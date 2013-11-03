@@ -1,5 +1,7 @@
-package org.telegram.mtproto;
+package org.telegram.mtproto.pq;
 
+import org.telegram.mtproto.ServerException;
+import org.telegram.mtproto.TransportSecurityException;
 import org.telegram.mtproto.secure.CryptoUtils;
 import org.telegram.mtproto.secure.Entropy;
 import org.telegram.mtproto.secure.Keys;
@@ -56,7 +58,7 @@ public class Authorizer {
         return object.deserializeResponse(messageResponse, initContext);
     }
 
-    private void authAttempt() throws IOException {
+    private PqAuth authAttempt() throws IOException {
         // PQ-Auth start
         byte[] nonce = Entropy.generateSeed(16);
         ResPQ resPQ = executeMethod(new ReqPQ(nonce));
@@ -157,7 +159,7 @@ public class Authorizer {
 
                 byte[] serverSalt = xor(substring(newNonce, 0, 8), substring(serverNonce, 0, 8));
 
-                // return new AuthConfiguration(dc, authKey, serverSalt);
+                return new PqAuth(authKey, serverSalt, context.getSocket());
             } else if (result instanceof DhGenRetry) {
                 byte[] newNonceHash = substring(SHA1(newNonce, new byte[]{2}, authAuxHash), 4, 16);
 
@@ -176,12 +178,11 @@ public class Authorizer {
         throw new ServerException();
     }
 
-    public void doAuth() {
+    public PqAuth doAuth() {
         for (int i = 0; i < AUTH_ATTEMPT_COUNT; i++) {
             try {
                 context = new PlainTcpConnection("173.240.5.1", 443);
-                authAttempt();
-                context.destroy();
+                return authAttempt();
             } catch (IOException e) {
                 e.printStackTrace();
             } finally {
@@ -193,8 +194,9 @@ public class Authorizer {
             try {
                 Thread.sleep(300);
             } catch (InterruptedException e) {
-                return;
+                return null;
             }
         }
+        return null;
     }
 }

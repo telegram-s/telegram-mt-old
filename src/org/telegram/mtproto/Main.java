@@ -1,6 +1,7 @@
 package org.telegram.mtproto;
 
-import org.telegram.mtproto.transport.TcpContext;
+import org.telegram.mtproto.pq.Authorizer;
+import org.telegram.mtproto.pq.PqAuth;
 
 import java.io.IOException;
 
@@ -13,6 +14,6 @@ import java.io.IOException;
 public class Main {
     public static void main(String[] args) throws IOException {
         Authorizer authorizer = new Authorizer();
-        authorizer.doAuth();
+        PqAuth auth = authorizer.doAuth();
     }
 }

@@ -32,6 +32,10 @@ public class PlainTcpConnection {
         this.isBroken = false;
     }
 
+    public Socket getSocket() {
+        return socket;
+    }
+
     private byte[] readMessage() throws IOException {
         InputStream stream = socket.getInputStream();
         int headerLen = readByte(stream);
