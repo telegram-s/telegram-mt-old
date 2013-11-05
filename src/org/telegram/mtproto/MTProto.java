@@ -91,6 +91,22 @@ public class MTProto {
         this.responseProcessor.start();
     }
 
+    public void close() {
+        if (!isClosed) {
+            this.isClosed = true;
+            if (this.connectionFixerThread != null) {
+                this.connectionFixerThread.interrupt();
+            }
+            if (this.schedullerThread != null) {
+                this.schedullerThread.interrupt();
+            }
+            if (this.responseProcessor != null) {
+                this.responseProcessor.interrupt();
+            }
+            closeConnections();
+        }
+    }
+
     public void closeConnections() {
         synchronized (contexts) {
             for (TcpContext context : contexts) {
