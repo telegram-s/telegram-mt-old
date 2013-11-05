@@ -6,6 +6,8 @@ import org.telegram.tl.TLObject;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.telegram.tl.StreamingUtils.*;
 
@@ -16,6 +18,8 @@ import static org.telegram.tl.StreamingUtils.*;
  * Time: 21:42
  */
 public class MTRpcError extends TLObject {
+
+    private static final Pattern REGEXP_PATTERN = Pattern.compile("[A-Z_0-9]+");
 
     public static final int CLASS_ID = 0x2144ca19;
 
@@ -30,6 +34,17 @@ public class MTRpcError extends TLObject {
 
     public MTRpcError() {
 
+    }
+
+    public String getErrorTag() {
+        if (message == null) {
+            return "DEFAULT";
+        }
+        Matcher matcher = REGEXP_PATTERN.matcher(message);
+        if (matcher.find()) {
+            return matcher.group();
+        }
+        return "DEFAULT";
     }
 
     public int getErrorCode() {

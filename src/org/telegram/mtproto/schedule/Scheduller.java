@@ -1,5 +1,6 @@
 package org.telegram.mtproto.schedule;
 
+import org.omg.PortableServer.ServantRetentionPolicy;
 import org.telegram.mtproto.log.Logger;
 import org.telegram.mtproto.time.TimeOverlord;
 import org.telegram.mtproto.tl.MTMessage;
@@ -20,6 +21,8 @@ public class Scheduller {
     // Share identity values across all connections to avoid collisions
     private static AtomicInteger messagesIds = new AtomicInteger(0);
     private static HashMap<Long, Long> idGenerationTime = new HashMap<Long, Long>();
+
+    private static final int SCHEDULLER_TIMEOUT = 15 * 1000;//15 sec
 
     private static final int MAX_WORKLOAD_SIZE = 1024;
     private static final long RETRY_TIMEOUT = 3 * 1000;
@@ -67,14 +70,35 @@ public class Scheduller {
         return 0;
     }
 
-    public int postMessage(TLObject object, long timeout) {
+    public int postMessageDelayed(TLObject object, long timeout, int delay) {
         int id = internalId.incrementAndGet();
         SchedullerPackage schedullerPackage = new SchedullerPackage(id);
         schedullerPackage.object = object;
         schedullerPackage.addTime = getCurrentTime();
-        schedullerPackage.expiresTime = schedullerPackage.addTime + timeout;
+        schedullerPackage.scheduleTime = schedullerPackage.addTime + delay * 1000L * 1000L;
+        schedullerPackage.expiresTime = schedullerPackage.scheduleTime + timeout;
         messages.put(messagesIds.incrementAndGet(), schedullerPackage);
         return id;
+    }
+
+    public int postMessage(TLObject object, long timeout) {
+        return postMessageDelayed(object, timeout, 0);
+    }
+
+    public long getSchedullerDelay() {
+        long minDelay = SCHEDULLER_TIMEOUT;
+        long time = getCurrentTime();
+        for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
+            if (schedullerPackage.state == STATE_QUEUED) {
+                if (schedullerPackage.scheduleTime <= time) {
+                    minDelay = 0;
+                } else {
+                    long delta = (time - schedullerPackage.scheduleTime) / (1000L * 1000L);
+                    minDelay = Math.min(delta, minDelay);
+                }
+            }
+        }
+        return minDelay;
     }
 
     public int mapSchedullerId(long msgId) {
@@ -101,6 +125,10 @@ public class Scheduller {
     }
 
     public void resendAsNewMessage(long msgId) {
+        resendAsNewMessageDelayed(msgId, 0);
+    }
+
+    public void resendAsNewMessageDelayed(long msgId, int delay) {
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             boolean contains = false;
             for (Long relatedMsgId : schedullerPackage.relatedMessageIds) {
@@ -115,6 +143,7 @@ public class Scheduller {
                 schedullerPackage.seqNo = 0;
                 schedullerPackage.relatedMessageIds.clear();
                 schedullerPackage.state = STATE_QUEUED;
+                schedullerPackage.scheduleTime = getCurrentTime() + delay * 1000L * 1000L;
             }
         }
     }
@@ -266,6 +295,7 @@ public class Scheduller {
         public byte[] serialized;
 
         public long addTime;
+        public long scheduleTime;
         public long expiresTime;
         public long lastAttemptTime;
         public int state = STATE_QUEUED;

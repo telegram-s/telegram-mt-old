@@ -32,8 +32,6 @@ import static org.telegram.tl.StreamingUtils.*;
 public class MTProto {
     private static final String TAG = "MTProto";
 
-    private static final int SCHEDULLER_TIMEOUT = 15 * 1000;//15 sec
-
     private static final int ERROR_MSG_ID_TOO_SMALL = 16;
     private static final int ERROR_MSG_ID_TOO_BIG = 17;
     private static final int ERROR_MSG_ID_BITS = 18;
@@ -165,14 +163,18 @@ public class MTProto {
                         scheduller.resetSession();
                     }
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
+                    requestSchedule();
                 } else if (badMessage.getErrorCode() == ERROR_BAD_SERVER_SALT) {
                     serverSalt = ((MTBadServerSalt) badMessage).getNewSalt();
                     scheduller.resendMessage(badMessage.getBadMsgId());
+                    requestSchedule();
                 } else if (badMessage.getErrorCode() == ERROR_BAD_CONTAINER ||
                         badMessage.getErrorCode() == ERROR_CONTAINER_MSG_ID_INCORRECT) {
                     scheduller.resendMessage(badMessage.getBadMsgId());
+                    requestSchedule();
                 } else if (badMessage.getErrorCode() == ERROR_TOO_OLD) {
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
+                    requestSchedule();
                 }
             }
         } else if (object instanceof MTMsgsAck) {
@@ -189,7 +191,15 @@ public class MTProto {
                 if (responseConstructor == MTRpcError.CLASS_ID) {
                     try {
                         MTRpcError error = (MTRpcError) protoContext.deserializeMessage(result.getContent());
-                        callback.onRpcError(id, error.getErrorCode(), error.getMessage());
+
+                        if (error.getErrorTag().startsWith("FLOOD_WAIT_")) {
+                            // Secs
+                            int delay = Integer.parseInt(error.getErrorTag().substring("FLOOD_WAIT_".length()));
+                            scheduller.resendAsNewMessageDelayed(result.getMessageId(), delay * 1000);
+                            requestSchedule();
+                        } else {
+                            callback.onRpcError(id, error.getErrorCode(), error.getMessage());
+                        }
                     } catch (IOException e) {
                         e.printStackTrace();
                         return;
@@ -321,7 +331,7 @@ public class MTProto {
                 synchronized (scheduller) {
                     if (contexts.size() == 0) {
                         try {
-                            scheduller.wait(SCHEDULLER_TIMEOUT);
+                            scheduller.wait(scheduller.getSchedullerDelay());
                         } catch (InterruptedException e) {
                             return;
                         }
@@ -342,7 +352,7 @@ public class MTProto {
                     PreparedPackage preparedPackage = scheduller.doSchedule();
                     if (preparedPackage == null) {
                         try {
-                            scheduller.wait(SCHEDULLER_TIMEOUT);
+                            scheduller.wait(scheduller.getSchedullerDelay());
                         } catch (InterruptedException e) {
                             return;
                         }
