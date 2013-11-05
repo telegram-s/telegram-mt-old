@@ -43,6 +43,10 @@ public class MTMsgsAck extends TLObject {
         Collections.addAll(this.messages, msgIds);
     }
 
+    public TLLongVector getMessages() {
+        return messages;
+    }
+
     @Override
     public int getClassId() {
         return CLASS_ID;

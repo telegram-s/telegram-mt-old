@@ -13,20 +13,31 @@ import static org.telegram.tl.StreamingUtils.*;
  * Created with IntelliJ IDEA.
  * User: ex3ndr
  * Date: 03.11.13
- * Time: 8:47
+ * Time: 21:42
  */
-public class MTBadMessageNotification extends MTBadMessage {
+public class MTRpcError extends TLObject {
 
-    public static final int CLASS_ID = 0xa7eff811;
+    public static final int CLASS_ID = 0x2144ca19;
 
-    public MTBadMessageNotification(long badMsgId, int badMsqSeqno, int errorCode) {
-        this.badMsgId = badMsgId;
-        this.badMsqSeqno = badMsqSeqno;
+    private int errorCode;
+
+    private String message;
+
+    public MTRpcError(int errorCode, String message) {
         this.errorCode = errorCode;
+        this.message = message;
     }
 
-    public MTBadMessageNotification() {
+    public MTRpcError() {
 
+    }
+
+    public int getErrorCode() {
+        return errorCode;
+    }
+
+    public String getMessage() {
+        return message;
     }
 
     @Override
@@ -36,15 +47,13 @@ public class MTBadMessageNotification extends MTBadMessage {
 
     @Override
     public void serializeBody(OutputStream stream) throws IOException {
-        writeLong(badMsgId, stream);
-        writeInt(badMsqSeqno, stream);
         writeInt(errorCode, stream);
+        writeTLString(message, stream);
     }
 
     @Override
     public void deserializeBody(InputStream stream, TLContext context) throws IOException {
-        badMsgId = readLong(stream);
-        badMsqSeqno = readInt(stream);
         errorCode = readInt(stream);
+        message = readTLString(stream);
     }
 }

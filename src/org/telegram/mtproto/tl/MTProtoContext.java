@@ -17,5 +17,8 @@ public class MTProtoContext extends TLContext {
         registerClass(MTNewSessionCreated.CLASS_ID, MTNewSessionCreated.class);
         registerClass(MTBadMessageNotification.CLASS_ID, MTBadMessageNotification.class);
         registerClass(MTBadServerSalt.CLASS_ID, MTBadServerSalt.class);
+        registerClass(MTMessagesContainer.CLASS_ID, MTMessagesContainer.class);
+        registerClass(MTRpcError.CLASS_ID, MTRpcError.class);
+        registerClass(MTRpcResult.CLASS_ID, MTRpcResult.class);
     }
 }

@@ -15,36 +15,21 @@ import static org.telegram.tl.StreamingUtils.*;
  * Date: 03.11.13
  * Time: 8:45
  */
-public class MTBadServerSalt extends TLObject {
+public class MTBadServerSalt extends MTBadMessage {
 
     public static final int CLASS_ID = 0xedab447b;
 
-    private long messageId;
-    private int seqNo;
-    private int errorNo;
     private byte[] newSalt;
 
     public MTBadServerSalt(long messageId, int seqNo, int errorNo, byte[] newSalt) {
-        this.messageId = messageId;
-        this.seqNo = seqNo;
-        this.errorNo = errorNo;
+        this.badMsgId = messageId;
+        this.badMsqSeqno = seqNo;
+        this.errorCode = errorNo;
         this.newSalt = newSalt;
     }
 
     public MTBadServerSalt() {
 
-    }
-
-    public long getMessageId() {
-        return messageId;
-    }
-
-    public int getSeqNo() {
-        return seqNo;
-    }
-
-    public int getErrorNo() {
-        return errorNo;
     }
 
     public byte[] getNewSalt() {
@@ -58,17 +43,17 @@ public class MTBadServerSalt extends TLObject {
 
     @Override
     public void serializeBody(OutputStream stream) throws IOException {
-        writeLong(messageId, stream);
-        writeInt(seqNo, stream);
-        writeInt(errorNo, stream);
+        writeLong(badMsgId, stream);
+        writeInt(badMsqSeqno, stream);
+        writeInt(errorCode, stream);
         writeByteArray(newSalt, stream);
     }
 
     @Override
     public void deserializeBody(InputStream stream, TLContext context) throws IOException {
-        messageId = readLong(stream);
-        seqNo = readInt(stream);
-        errorNo = readInt(stream);
+        badMsgId = readLong(stream);
+        badMsqSeqno = readInt(stream);
+        errorCode = readInt(stream);
         newSalt = readBytes(8, stream);
     }
 }

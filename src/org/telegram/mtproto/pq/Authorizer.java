@@ -33,12 +33,13 @@ public class Authorizer {
     private PlainTcpConnection context;
     private TLInitContext initContext;
 
-    public Authorizer() throws IOException {
+    public Authorizer() {
         initContext = new TLInitContext();
     }
 
     private <T extends TLObject> T executeMethod(TLMethod<T> object) throws IOException {
         long requestMessageId = TimeOverlord.getInstance().createWeakMessageId();
+        long start = System.nanoTime();
         byte[] data = object.serialize();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         writeLong(0, out); // Empty AUTH_ID
@@ -52,7 +53,7 @@ public class Authorizer {
             throw new IOException("Auth id might be equal to zero");
         }
         long messageId = readLong(in);
-        TimeOverlord.getInstance().onMethodExecuted(requestMessageId, messageId);
+        // TimeOverlord.getInstance().onMethodExecuted(requestMessageId, messageId, (System.nanoTime() - start) / 1000000);
         int length = readInt(in);
         byte[] messageResponse = readBytes(length, in);
         return object.deserializeResponse(messageResponse, initContext);
@@ -104,8 +105,10 @@ public class Authorizer {
 
         byte[] encrypted = CryptoUtils.RSA(dataWithHash, publicKey.getPublicKey(), publicKey.getExponent());
 
+        long start = System.nanoTime();
         ServerDhParams dhParams = executeMethod(new ReqDhParams(nonce, serverNonce, fromBigInt(p), fromBigInt(q),
                 fingerprint, encrypted));
+        long dhParamsDuration = (System.nanoTime() - start) / (1000 * 1000);
 
         if (dhParams instanceof ServerDhFailure) {
             ServerDhFailure hdFailure = (ServerDhFailure) dhParams;
@@ -133,6 +136,8 @@ public class Authorizer {
         if (!arrayEq(answerHash, SHA1(dhInner.serialize()))) {
             throw new TransportSecurityException();
         }
+
+        TimeOverlord.getInstance().onServerTimeArrived(dhInner.getServerTime() * 1000L, dhParamsDuration);
 
         for (int i = 0; i < AUTH_RETRY_COUNT; i++) {
             BigInteger b = loadBigInt(Entropy.generateSeed(256));
@@ -178,10 +183,10 @@ public class Authorizer {
         throw new ServerException();
     }
 
-    public PqAuth doAuth() {
+    public PqAuth doAuth(String address, int port) {
         for (int i = 0; i < AUTH_ATTEMPT_COUNT; i++) {
             try {
-                context = new PlainTcpConnection("173.240.5.1", 443);
+                context = new PlainTcpConnection(address, port);
                 return authAttempt();
             } catch (IOException e) {
                 e.printStackTrace();
