@@ -29,6 +29,8 @@ public class Scheduller {
     private long lastMessageId = 0;
     private int seqNo = 0;
 
+    private AtomicInteger internalId = new AtomicInteger(1);
+
     private synchronized long generateMessageId() {
         long messageId = TimeOverlord.getInstance().createWeakMessageId();
         if (messageId <= lastMessageId) {
@@ -64,12 +66,23 @@ public class Scheduller {
         return 0;
     }
 
-    public void postMessage(TLObject object, long timeout) {
-        SchedullerPackage schedullerPackage = new SchedullerPackage();
+    public int postMessage(TLObject object, long timeout) {
+        int id = internalId.incrementAndGet();
+        SchedullerPackage schedullerPackage = new SchedullerPackage(id);
         schedullerPackage.object = object;
         schedullerPackage.addTime = getCurrentTime();
         schedullerPackage.expiresTime = schedullerPackage.addTime + timeout;
         messages.put(messagesIds.incrementAndGet(), schedullerPackage);
+        return id;
+    }
+
+    public int mapSchedullerId(long msgId) {
+        for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
+            if (schedullerPackage.messageId == msgId) {
+                return schedullerPackage.id;
+            }
+        }
+        return 0;
     }
 
     public void resetMessageId() {
@@ -241,6 +254,13 @@ public class Scheduller {
     private static final int STATE_CONFIRMED = 2;
 
     private class SchedullerPackage {
+
+        public SchedullerPackage(int id) {
+            this.id = id;
+        }
+
+        public int id;
+
         public TLObject object;
         public byte[] serialized;
 

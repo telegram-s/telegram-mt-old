@@ -101,11 +101,12 @@ public class MTProto {
         }
     }
 
-    public void sendMessage(TLObject request, long timeout) {
-        scheduller.postMessage(request, timeout);
+    public int sendMessage(TLObject request, long timeout) {
+        int id = scheduller.postMessage(request, timeout);
         synchronized (scheduller) {
             scheduller.notifyAll();
         }
+        return id;
     }
 
     private void onMTMessage(MTMessage mtMessage) {
@@ -121,7 +122,7 @@ public class MTProto {
     }
 
     public void onApiMessage(byte[] data) {
-        Logger.d(TAG, "ApiMessage: " + Integer.toHexString(readInt(data)));
+        callback.onApiMessage(data);
     }
 
     public void onMTProtoMessage(long msgId, TLObject object) {
@@ -165,17 +166,24 @@ public class MTProto {
             }
         } else if (object instanceof MTRpcResult) {
             MTRpcResult result = (MTRpcResult) object;
-            int responseConstructor = readInt(result.getContent());
-            if (responseConstructor == MTRpcError.CLASS_ID) {
-                try {
-                    MTRpcError error = (MTRpcError) protoContext.deserializeMessage(result.getContent());
-                    Logger.d(TAG, "rpc_error: " + result.getMessageId() + " " + error.getErrorCode() + ": " + error.getMessage());
-                } catch (IOException e) {
-                    e.printStackTrace();
-                    return;
+
+            int id = scheduller.mapSchedullerId(result.getMessageId());
+            if (id > 0) {
+                int responseConstructor = readInt(result.getContent());
+                if (responseConstructor == MTRpcError.CLASS_ID) {
+                    try {
+                        MTRpcError error = (MTRpcError) protoContext.deserializeMessage(result.getContent());
+                        callback.onRpcError(id, error.getErrorCode(), error.getMessage());
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        return;
+                    }
+                } else {
+                    Logger.d(TAG, "rpc_result: " + result.getMessageId() + " #" + Integer.toHexString(responseConstructor));
+                    callback.onRpcResult(id, result.getContent());
                 }
             } else {
-                Logger.d(TAG, "rpc_result: " + result.getMessageId() + " #" + Integer.toHexString(responseConstructor));
+                Logger.d(TAG, "ignored rpc_result: " + result.getMessageId());
             }
             scheduller.onMessageConfirmed(result.getMessageId());
             long time = scheduller.getMessageIdGenerationTime(result.getMessageId());
