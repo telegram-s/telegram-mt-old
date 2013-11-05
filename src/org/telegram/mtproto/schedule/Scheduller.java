@@ -17,14 +17,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Time: 8:51
  */
 public class Scheduller {
+    // Share identity values across all connections to avoid collisions
+    private static AtomicInteger messagesIds = new AtomicInteger(0);
+    private static HashMap<Long, Long> idGenerationTime = new HashMap<Long, Long>();
+
     private static final int MAX_WORKLOAD_SIZE = 1024;
     private static final long RETRY_TIMEOUT = 3 * 1000;
 
     private TreeMap<Integer, SchedullerPackage> messages = new TreeMap<Integer, SchedullerPackage>();
-    private HashMap<Long, Long> idGenerationTime = new HashMap<Long, Long>();
     private HashSet<Long> currentMessageGeneration = new HashSet<Long>();
-
-    private AtomicInteger messagesIds = new AtomicInteger(0);
 
     private long lastMessageId = 0;
     private int seqNo = 0;
