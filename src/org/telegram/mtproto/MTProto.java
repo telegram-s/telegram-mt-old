@@ -331,7 +331,10 @@ public class MTProto {
                 synchronized (scheduller) {
                     if (contexts.size() == 0) {
                         try {
-                            scheduller.wait(scheduller.getSchedullerDelay());
+                            long delay = scheduller.getSchedullerDelay();
+                            if (delay > 0) {
+                                scheduller.wait(delay);
+                            }
                         } catch (InterruptedException e) {
                             return;
                         }
@@ -352,7 +355,10 @@ public class MTProto {
                     PreparedPackage preparedPackage = scheduller.doSchedule();
                     if (preparedPackage == null) {
                         try {
-                            scheduller.wait(scheduller.getSchedullerDelay());
+                            long delay = scheduller.getSchedullerDelay();
+                            if (delay > 0) {
+                                scheduller.wait(delay);
+                            }
                         } catch (InterruptedException e) {
                             return;
                         }

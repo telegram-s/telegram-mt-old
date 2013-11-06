@@ -200,11 +200,14 @@ public class Scheduller {
 
     public PreparedPackage doSchedule() {
         int totalSize = 0;
+        long time = getCurrentTime();
         ArrayList<SchedullerPackage> foundedPackages = new ArrayList<SchedullerPackage>();
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             boolean isPendingPackage = false;
             if (schedullerPackage.state == STATE_QUEUED) {
-                isPendingPackage = true;
+                if (schedullerPackage.scheduleTime < time) {
+                    isPendingPackage = true;
+                }
             } else if (schedullerPackage.state == STATE_SENT) {
                 if (getCurrentTime() < schedullerPackage.expiresTime) {
                     if (getCurrentTime() - schedullerPackage.lastAttemptTime > RETRY_TIMEOUT) {
@@ -298,6 +301,9 @@ public class Scheduller {
         public long scheduleTime;
         public long expiresTime;
         public long lastAttemptTime;
+
+        public int errorCount;
+
         public int state = STATE_QUEUED;
 
         public long idGenerationTime;
