@@ -146,7 +146,7 @@ public class Authorizer {
             BigInteger gb = g.modPow(b, dhPrime);
 
             BigInteger authKeyVal = loadBigInt(dhInner.getG_a()).modPow(b, dhPrime);
-            byte[] authKey = fromBigInt(authKeyVal);
+            byte[] authKey = alignKeyZero(fromBigInt(authKeyVal), 256);
             byte[] authAuxHash = substring(SHA1(authKey), 0, 8);
 
             ClientDhInner clientDHInner = new ClientDhInner(nonce, serverNonce, i, fromBigInt(gb));
