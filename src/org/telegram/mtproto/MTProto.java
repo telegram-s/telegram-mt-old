@@ -11,6 +11,7 @@ import org.telegram.mtproto.transport.TcpContext;
 import org.telegram.mtproto.transport.TcpContextCallback;
 import org.telegram.tl.DeserializeException;
 import org.telegram.tl.StreamingUtils;
+import org.telegram.tl.TLMethod;
 import org.telegram.tl.TLObject;
 
 import java.io.ByteArrayInputStream;
@@ -69,7 +70,8 @@ public class MTProto {
 
     private MTProtoCallback callback;
 
-    public MTProto(byte[] authKey, byte[] serverSalt, String address, int port, MTProtoCallback callback) {
+    public MTProto(byte[] authKey, byte[] serverSalt, String address, int port, MTProtoCallback callback,
+                   CallWrapper callWrapper) {
         this.authKey = authKey;
         this.serverSalt = serverSalt;
         this.address = address;
@@ -82,7 +84,7 @@ public class MTProto {
         this.tcpListener = new TcpListener();
         this.connectionFixerThread = new ConnectionFixerThread();
         this.connectionFixerThread.start();
-        this.scheduller = new Scheduller();
+        this.scheduller = new Scheduller(callWrapper);
         this.schedullerThread = new SchedullerThread();
         this.schedullerThread.start();
         this.responseProcessor = new ResponseProcessor();
@@ -115,8 +117,12 @@ public class MTProto {
         }
     }
 
-    public int sendMessage(TLObject request, long timeout) {
-        int id = scheduller.postMessage(request, timeout);
+    public int sendRpcMessage(TLMethod request, long timeout) {
+        return sendMessage(request, timeout, true);
+    }
+
+    public int sendMessage(TLObject request, long timeout, boolean isRpc) {
+        int id = scheduller.postMessage(request, isRpc, timeout);
         synchronized (scheduller) {
             scheduller.notifyAll();
         }

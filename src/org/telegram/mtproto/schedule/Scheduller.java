@@ -1,10 +1,12 @@
 package org.telegram.mtproto.schedule;
 
 import org.omg.PortableServer.ServantRetentionPolicy;
+import org.telegram.mtproto.CallWrapper;
 import org.telegram.mtproto.log.Logger;
 import org.telegram.mtproto.time.TimeOverlord;
 import org.telegram.mtproto.tl.MTMessage;
 import org.telegram.mtproto.tl.MTMessagesContainer;
+import org.telegram.tl.TLMethod;
 import org.telegram.tl.TLObject;
 
 import java.io.IOException;
@@ -34,6 +36,14 @@ public class Scheduller {
     private int seqNo = 0;
 
     private AtomicInteger internalId = new AtomicInteger(1);
+
+    private boolean isRegisteredInApi = false;
+
+    private CallWrapper wrapper;
+
+    public Scheduller(CallWrapper wrapper) {
+        this.wrapper = wrapper;
+    }
 
     private synchronized long generateMessageId() {
         long messageId = TimeOverlord.getInstance().createWeakMessageId();
@@ -70,19 +80,20 @@ public class Scheduller {
         return 0;
     }
 
-    public int postMessageDelayed(TLObject object, long timeout, int delay) {
+    public int postMessageDelayed(TLObject object, boolean isRpc, long timeout, int delay) {
         int id = internalId.incrementAndGet();
         SchedullerPackage schedullerPackage = new SchedullerPackage(id);
         schedullerPackage.object = object;
         schedullerPackage.addTime = getCurrentTime();
         schedullerPackage.scheduleTime = schedullerPackage.addTime + delay * 1000L * 1000L;
         schedullerPackage.expiresTime = schedullerPackage.scheduleTime + timeout;
+        schedullerPackage.isRpc = isRpc;
         messages.put(messagesIds.incrementAndGet(), schedullerPackage);
         return id;
     }
 
-    public int postMessage(TLObject object, long timeout) {
-        return postMessageDelayed(object, timeout, 0);
+    public int postMessage(TLObject object, boolean isApi, long timeout) {
+        return postMessageDelayed(object, isApi, timeout, 0);
     }
 
     public long getSchedullerDelay() {
@@ -219,7 +230,11 @@ public class Scheduller {
             if (isPendingPackage) {
                 if (schedullerPackage.serialized == null) {
                     try {
-                        schedullerPackage.serialized = schedullerPackage.object.serialize();
+                        if (schedullerPackage.isRpc) {
+                            schedullerPackage.serialized = wrapper.wrapObject((TLMethod) schedullerPackage.object).serialize();
+                        } else {
+                            schedullerPackage.serialized = schedullerPackage.object.serialize();
+                        }
                     } catch (IOException e) {
                         e.printStackTrace();
                         messages.remove(schedullerPackage);
@@ -310,5 +325,7 @@ public class Scheduller {
         public long messageId;
         public int seqNo;
         public ArrayList<Long> relatedMessageIds = new ArrayList<Long>();
+
+        public boolean isRpc;
     }
 }
