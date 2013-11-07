@@ -119,6 +119,16 @@ public class TcpContext {
             Logger.w(TAG, "Manual context closing");
             isClosed = true;
             isBroken = false;
+            try {
+                readerThread.interrupt();
+            } catch (Exception e) {
+                Logger.t(TAG, e);
+            }
+            try {
+                writerThread.interrupt();
+            } catch (Exception e) {
+                Logger.t(TAG, e);
+            }
         }
     }
 

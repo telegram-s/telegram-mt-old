@@ -9,9 +9,11 @@ package org.telegram.mtproto;
 public interface MTProtoCallback {
     public void onSessionCreated(MTProto proto);
 
-    public void onApiMessage(byte[] message);
+    public void onAuthInvalidated(MTProto proto);
 
-    public void onRpcResult(int callId, byte[] response);
+    public void onApiMessage(byte[] message, MTProto proto);
 
-    public void onRpcError(int callId, int errorCode, String message);
+    public void onRpcResult(int callId, byte[] response, MTProto proto);
+
+    public void onRpcError(int callId, int errorCode, String message, MTProto proto);
 }

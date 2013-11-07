@@ -107,6 +107,10 @@ public class MTProto {
         }
     }
 
+    public boolean isClosed() {
+        return isClosed;
+    }
+
     public void closeConnections() {
         synchronized (contexts) {
             for (TcpContext context : contexts) {
@@ -142,7 +146,7 @@ public class MTProto {
     }
 
     public void onApiMessage(byte[] data) {
-        callback.onApiMessage(data);
+        callback.onApiMessage(data, this);
     }
 
     public void onMTProtoMessage(long msgId, TLObject object) {
@@ -198,21 +202,36 @@ public class MTProto {
                     try {
                         MTRpcError error = (MTRpcError) protoContext.deserializeMessage(result.getContent());
 
-                        if (error.getErrorTag().startsWith("FLOOD_WAIT_")) {
-                            // Secs
-                            int delay = Integer.parseInt(error.getErrorTag().substring("FLOOD_WAIT_".length()));
-                            scheduller.resendAsNewMessageDelayed(result.getMessageId(), delay * 1000);
-                            requestSchedule();
-                        } else {
-                            callback.onRpcError(id, error.getErrorCode(), error.getMessage());
+                        if (error.getErrorCode() == 420) {
+                            if (error.getErrorTag().startsWith("FLOOD_WAIT_")) {
+                                // Secs
+                                int delay = Integer.parseInt(error.getErrorTag().substring("FLOOD_WAIT_".length()));
+                                scheduller.resendAsNewMessageDelayed(result.getMessageId(), delay * 1000);
+                                requestSchedule();
+                                return;
+                            }
                         }
+                        if (error.getErrorCode() == 401) {
+                            if (error.getErrorTag().equals("AUTH_KEY_UNREGISTERED") ||
+                                    error.getErrorTag().equals("AUTH_KEY_INVALID") ||
+                                    error.getErrorTag().equals("USER_DEACTIVATED") ||
+                                    error.getErrorTag().equals("SESSION_REVOKED") ||
+                                    error.getErrorTag().equals("SESSION_EXPIRED")) {
+                                Logger.w(TAG, "Auth key invalidated");
+                                callback.onAuthInvalidated(this);
+                                close();
+                                return;
+                            }
+                        }
+
+                        callback.onRpcError(id, error.getErrorCode(), error.getMessage(), this);
                     } catch (IOException e) {
                         e.printStackTrace();
                         return;
                     }
                 } else {
                     Logger.d(TAG, "rpc_result: " + result.getMessageId() + " #" + Integer.toHexString(responseConstructor));
-                    callback.onRpcResult(id, result.getContent());
+                    callback.onRpcResult(id, result.getContent(), this);
                 }
             } else {
                 Logger.d(TAG, "ignored rpc_result: " + result.getMessageId());
@@ -490,6 +509,12 @@ public class MTProto {
         public void onError(int errorCode, TcpContext context) {
             if (isClosed) {
                 return;
+            }
+            Logger.w(TAG, "Received error: " + errorCode);
+            context.close();
+            synchronized (contexts) {
+                contexts.remove(context);
+                contexts.notifyAll();
             }
         }
 
