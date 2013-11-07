@@ -19,9 +19,9 @@ public class MTBadServerSalt extends MTBadMessage {
 
     public static final int CLASS_ID = 0xedab447b;
 
-    private byte[] newSalt;
+    private long newSalt;
 
-    public MTBadServerSalt(long messageId, int seqNo, int errorNo, byte[] newSalt) {
+    public MTBadServerSalt(long messageId, int seqNo, int errorNo, long newSalt) {
         this.badMsgId = messageId;
         this.badMsqSeqno = seqNo;
         this.errorCode = errorNo;
@@ -32,7 +32,7 @@ public class MTBadServerSalt extends MTBadMessage {
 
     }
 
-    public byte[] getNewSalt() {
+    public long getNewSalt() {
         return newSalt;
     }
 
@@ -46,7 +46,7 @@ public class MTBadServerSalt extends MTBadMessage {
         writeLong(badMsgId, stream);
         writeInt(badMsqSeqno, stream);
         writeInt(errorCode, stream);
-        writeByteArray(newSalt, stream);
+        writeLong(newSalt, stream);
     }
 
     @Override
@@ -54,6 +54,6 @@ public class MTBadServerSalt extends MTBadMessage {
         badMsgId = readLong(stream);
         badMsqSeqno = readInt(stream);
         errorCode = readInt(stream);
-        newSalt = readBytes(8, stream);
+        newSalt = readLong(stream);
     }
 }

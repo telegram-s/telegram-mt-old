@@ -296,7 +296,7 @@ public class TcpContext {
                         try {
                             packages.wait();
                         } catch (InterruptedException e) {
-                            e.printStackTrace();
+                            // e.printStackTrace();
                             return;
                         }
                         p = packages.poll();

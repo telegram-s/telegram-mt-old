@@ -1,0 +1,75 @@
+package org.telegram.mtproto.state;
+
+import org.telegram.mtproto.time.TimeOverlord;
+
+import java.util.HashMap;
+import java.util.HashSet;
+
+/**
+ * Created with IntelliJ IDEA.
+ * User: ex3ndr
+ * Date: 07.11.13
+ * Time: 7:15
+ */
+public abstract class AbsMTProtoState {
+
+    public abstract byte[] getAuthKey();
+
+    public abstract ConnectionInfo fetchConnectionInfo();
+
+    public abstract KnownSalt[] getKnownSalts();
+
+    protected abstract void writeKnownSalts(KnownSalt[] salts);
+
+    public void mergeKnownSalts(int currentTime, KnownSalt[] salts) {
+        KnownSalt[] knownSalts = getKnownSalts();
+        HashMap<Long, KnownSalt> ids = new HashMap<Long, KnownSalt>();
+        for (KnownSalt s : knownSalts) {
+            if (s.getValidUntil() < currentTime) {
+                continue;
+            }
+            ids.put(s.getSalt(), s);
+        }
+        for (KnownSalt s : salts) {
+            if (s.getValidUntil() < currentTime) {
+                continue;
+            }
+            ids.put(s.getSalt(), s);
+        }
+        writeKnownSalts(ids.values().toArray(new KnownSalt[0]));
+    }
+
+    public void addCurrentSalt(long salt) {
+        int time = (int) (TimeOverlord.getInstance().getServerTime() / 1000);
+        mergeKnownSalts(time, new KnownSalt[]{new KnownSalt(time, time + 30 * 60, salt)});
+    }
+
+    public long findActualSalt(int time) {
+        KnownSalt[] knownSalts = getKnownSalts();
+        for (KnownSalt salt : knownSalts) {
+            if (salt.getValidSince() <= time && time <= salt.getValidUntil()) {
+                return salt.getSalt();
+            }
+        }
+
+        return 0;
+    }
+
+    public int maximumCachedSalts(int time) {
+        int count = 0;
+        for (KnownSalt salt : getKnownSalts()) {
+            if (salt.getValidSince() > time) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public int maximumCachedSaltsTime() {
+        int max = 0;
+        for (KnownSalt salt : getKnownSalts()) {
+            max = Math.max(max, salt.getValidUntil());
+        }
+        return max;
+    }
+}

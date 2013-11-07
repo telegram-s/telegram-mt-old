@@ -6,6 +6,7 @@ import org.telegram.mtproto.log.Logger;
 import org.telegram.mtproto.time.TimeOverlord;
 import org.telegram.mtproto.tl.MTMessage;
 import org.telegram.mtproto.tl.MTMessagesContainer;
+import org.telegram.mtproto.tl.MTMsgsAck;
 import org.telegram.tl.TLMethod;
 import org.telegram.tl.TLObject;
 
@@ -21,23 +22,20 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class Scheduller {
     // Share identity values across all connections to avoid collisions
-    private static AtomicInteger messagesIds = new AtomicInteger(0);
+    private static AtomicInteger messagesIds = new AtomicInteger(1);
     private static HashMap<Long, Long> idGenerationTime = new HashMap<Long, Long>();
 
     private static final int SCHEDULLER_TIMEOUT = 15 * 1000;//15 sec
 
     private static final int MAX_WORKLOAD_SIZE = 1024;
-    private static final long RETRY_TIMEOUT = 3 * 1000;
+    private static final long RETRY_TIMEOUT = 15 * 1000;
 
-    private TreeMap<Integer, SchedullerPackage> messages = new TreeMap<Integer, SchedullerPackage>();
+    private SortedMap<Integer, SchedullerPackage> messages = Collections.synchronizedSortedMap(new TreeMap<Integer, SchedullerPackage>());
     private HashSet<Long> currentMessageGeneration = new HashSet<Long>();
+    private HashSet<Long> confirmedMessages = new HashSet<Long>();
 
     private long lastMessageId = 0;
     private int seqNo = 0;
-
-    private AtomicInteger internalId = new AtomicInteger(1);
-
-    private boolean isRegisteredInApi = false;
 
     private CallWrapper wrapper;
 
@@ -81,14 +79,19 @@ public class Scheduller {
     }
 
     public int postMessageDelayed(TLObject object, boolean isRpc, long timeout, int delay) {
-        int id = internalId.incrementAndGet();
+        return postMessageDelayed(object, isRpc, timeout, delay, -1);
+    }
+
+    public int postMessageDelayed(TLObject object, boolean isRpc, long timeout, int delay, int contextId) {
+        int id = messagesIds.incrementAndGet();
         SchedullerPackage schedullerPackage = new SchedullerPackage(id);
         schedullerPackage.object = object;
         schedullerPackage.addTime = getCurrentTime();
         schedullerPackage.scheduleTime = schedullerPackage.addTime + delay * 1000L * 1000L;
         schedullerPackage.expiresTime = schedullerPackage.scheduleTime + timeout;
         schedullerPackage.isRpc = isRpc;
-        messages.put(messagesIds.incrementAndGet(), schedullerPackage);
+        schedullerPackage.queuedToChannel = contextId;
+        messages.put(id, schedullerPackage);
         return id;
     }
 
@@ -192,6 +195,10 @@ public class Scheduller {
         }
     }
 
+    public void confirmMessage(long msgId) {
+        confirmedMessages.add(msgId);
+    }
+
     public void unableToSendMessage(long messageId) {
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             if (schedullerPackage.state == STATE_SENT) {
@@ -209,11 +216,14 @@ public class Scheduller {
         }
     }
 
-    public PreparedPackage doSchedule() {
+    public PreparedPackage doSchedule(int contextId) {
         int totalSize = 0;
         long time = getCurrentTime();
         ArrayList<SchedullerPackage> foundedPackages = new ArrayList<SchedullerPackage>();
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
+            if (schedullerPackage.queuedToChannel != -1 && contextId != schedullerPackage.queuedToChannel) {
+                continue;
+            }
             boolean isPendingPackage = false;
             if (schedullerPackage.state == STATE_QUEUED) {
                 if (schedullerPackage.scheduleTime < time) {
@@ -250,13 +260,23 @@ public class Scheduller {
                 }
             }
         }
-        if (foundedPackages.size() == 0) {
+
+        if (foundedPackages.size() == 0 && confirmedMessages.size() == 0) {
             return null;
         }
 
         Logger.d("Scheduller", "PackageSize: " + totalSize + ", count: " + foundedPackages.size());
 
-        if (foundedPackages.size() == 1) {
+        if (foundedPackages.size() == 0 && confirmedMessages.size() != 0) {
+            MTMsgsAck ack = new MTMsgsAck(confirmedMessages.toArray(new Long[0]));
+            confirmedMessages.clear();
+            try {
+                return new PreparedPackage(generateSeqNoWeak(), generateMessageId(), ack.serialize());
+            } catch (IOException e) {
+                e.printStackTrace();
+                return null;
+            }
+        } else if (foundedPackages.size() == 1 && confirmedMessages.size() == 0) {
             SchedullerPackage schedullerPackage = foundedPackages.get(0);
             schedullerPackage.state = STATE_SENT;
             if (schedullerPackage.idGenerationTime == 0) {
@@ -265,10 +285,20 @@ public class Scheduller {
                 schedullerPackage.seqNo = generateSeqNo();
                 schedullerPackage.relatedMessageIds.add(schedullerPackage.messageId);
             }
+            schedullerPackage.writtenToChannel = contextId;
             schedullerPackage.lastAttemptTime = getCurrentTime();
             return new PreparedPackage(schedullerPackage.seqNo, schedullerPackage.messageId, schedullerPackage.serialized);
         } else {
             MTMessagesContainer container = new MTMessagesContainer();
+            if (confirmedMessages.size() > 0) {
+                try {
+                    MTMsgsAck ack = new MTMsgsAck(confirmedMessages.toArray(new Long[0]));
+                    container.getMessages().add(new MTMessage(generateMessageId(), generateSeqNoWeak(), ack.serialize()));
+                    confirmedMessages.clear();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
             for (SchedullerPackage schedullerPackage : foundedPackages) {
                 schedullerPackage.state = STATE_SENT;
                 if (schedullerPackage.idGenerationTime == 0) {
@@ -277,6 +307,7 @@ public class Scheduller {
                     schedullerPackage.seqNo = generateSeqNo();
                     schedullerPackage.relatedMessageIds.add(schedullerPackage.messageId);
                 }
+                schedullerPackage.writtenToChannel = contextId;
                 schedullerPackage.lastAttemptTime = getCurrentTime();
                 container.getMessages().add(new MTMessage(schedullerPackage.messageId, schedullerPackage.seqNo, schedullerPackage.serialized));
             }
@@ -293,6 +324,19 @@ public class Scheduller {
                 // Might not happens
                 e.printStackTrace();
                 return null;
+            }
+        }
+    }
+
+    public void onConnectionDies(int connectionId) {
+        for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
+            if (schedullerPackage.queuedToChannel != -1 && schedullerPackage.queuedToChannel == connectionId) {
+                // messages.remove(schedullerPackage);
+            } else {
+                if (schedullerPackage.state == STATE_SENT && schedullerPackage.writtenToChannel == connectionId) {
+                    schedullerPackage.state = STATE_QUEUED;
+                    schedullerPackage.lastAttemptTime = 0;
+                }
             }
         }
     }
@@ -317,7 +361,9 @@ public class Scheduller {
         public long expiresTime;
         public long lastAttemptTime;
 
-        public int errorCount;
+        public int writtenToChannel = -1;
+
+        public int queuedToChannel = -1;
 
         public int state = STATE_QUEUED;
 

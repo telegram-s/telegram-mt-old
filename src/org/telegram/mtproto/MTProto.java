@@ -5,6 +5,9 @@ import org.telegram.mtproto.pq.PqAuth;
 import org.telegram.mtproto.schedule.PreparedPackage;
 import org.telegram.mtproto.schedule.Scheduller;
 import org.telegram.mtproto.secure.Entropy;
+import org.telegram.mtproto.state.AbsMTProtoState;
+import org.telegram.mtproto.state.ConnectionInfo;
+import org.telegram.mtproto.state.KnownSalt;
 import org.telegram.mtproto.time.TimeOverlord;
 import org.telegram.mtproto.tl.*;
 import org.telegram.mtproto.transport.TcpContext;
@@ -13,10 +16,12 @@ import org.telegram.tl.DeserializeException;
 import org.telegram.tl.StreamingUtils;
 import org.telegram.tl.TLMethod;
 import org.telegram.tl.TLObject;
+import sun.security.x509.IPAddressName;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -33,6 +38,9 @@ import static org.telegram.tl.StreamingUtils.*;
 public class MTProto {
     private static final String TAG = "MTProto";
 
+    private static final int MESSAGES_CACHE = 100;
+    private static final int MESSAGES_CACHE_MIN = 10;
+
     private static final int ERROR_MSG_ID_TOO_SMALL = 16;
     private static final int ERROR_MSG_ID_TOO_BIG = 17;
     private static final int ERROR_MSG_ID_BITS = 18;
@@ -44,6 +52,13 @@ public class MTProto {
     private static final int ERROR_SEQ_EXPECTED_ODD = 35;
     private static final int ERROR_BAD_SERVER_SALT = 48;
     private static final int ERROR_BAD_CONTAINER = 64;
+
+    private static final int PING_TIMEOUT = 60 * 1000;
+    private static final int RESEND_TIMEOUT = 60 * 1000;
+
+    private static final int FUTURE_REQUEST_COUNT = 64;
+    private static final int FUTURE_MINIMAL = 5;
+    private static final long FUTURE_TIMEOUT = 30 * 60 * 1000;//30 secs
 
     private MTProtoContext protoContext;
 
@@ -58,25 +73,27 @@ public class MTProto {
     private final ConcurrentLinkedQueue<MTMessage> inQueue = new ConcurrentLinkedQueue<MTMessage>();
     private ResponseProcessor responseProcessor;
 
+    private final ArrayList<Long> receivedMessages = new ArrayList<Long>();
+
     private byte[] authKey;
     private byte[] authKeyId;
-    private byte[] serverSalt;
     private byte[] session;
 
     private boolean isClosed;
 
-    private String address;
-    private int port;
-
     private MTProtoCallback callback;
 
-    public MTProto(byte[] authKey, byte[] serverSalt, String address, int port, MTProtoCallback callback,
-                   CallWrapper callWrapper) {
-        this.authKey = authKey;
-        this.serverSalt = serverSalt;
-        this.address = address;
-        this.port = port;
+    private AbsMTProtoState state;
+
+    private long futureSaltsRequestedTime = Long.MIN_VALUE;
+    private long futureSaltsRequestId = -1;
+
+    private int roundRobin = 0;
+
+    public MTProto(AbsMTProtoState state, MTProtoCallback callback, CallWrapper callWrapper) {
+        this.state = state;
         this.callback = callback;
+        this.authKey = state.getAuthKey();
         this.authKeyId = substring(SHA1(authKey), 12, 8);
         this.protoContext = new MTProtoContext();
         this.desiredConnectionCount = 2;
@@ -115,11 +132,42 @@ public class MTProto {
         synchronized (contexts) {
             for (TcpContext context : contexts) {
                 context.close();
+                scheduller.onConnectionDies(context.getContextId());
             }
             contexts.clear();
             contexts.notifyAll();
         }
     }
+
+    private boolean needProcessing(long messageId) {
+        synchronized (receivedMessages) {
+            if (receivedMessages.contains(messageId)) {
+                return false;
+            }
+
+            if (receivedMessages.size() > MESSAGES_CACHE_MIN) {
+                boolean isSmallest = true;
+                for (Long l : receivedMessages) {
+                    if (messageId > l) {
+                        isSmallest = false;
+                        break;
+                    }
+                }
+
+                if (isSmallest) {
+                    return false;
+                }
+            }
+
+            while (receivedMessages.size() >= MESSAGES_CACHE - 1) {
+                receivedMessages.remove(0);
+            }
+            receivedMessages.add(messageId);
+        }
+
+        return true;
+    }
+
 
     public int sendRpcMessage(TLMethod request, long timeout) {
         return sendMessage(request, timeout, true);
@@ -130,10 +178,26 @@ public class MTProto {
         synchronized (scheduller) {
             scheduller.notifyAll();
         }
+
+        if (futureSaltsRequestedTime - System.nanoTime() > FUTURE_TIMEOUT * 1000L) {
+            int count = state.maximumCachedSalts((int) (TimeOverlord.getInstance().getServerTime() / 1000));
+            if (count < FUTURE_MINIMAL) {
+                futureSaltsRequestId = scheduller.postMessage(new MTGetFutureSalts(FUTURE_REQUEST_COUNT), false, FUTURE_TIMEOUT);
+                futureSaltsRequestedTime = System.nanoTime();
+            }
+        }
+
         return id;
     }
 
     private void onMTMessage(MTMessage mtMessage) {
+        if (mtMessage.getSeqNo() % 2 == 1) {
+            scheduller.confirmMessage(mtMessage.getMessageId());
+        }
+        if (!needProcessing(mtMessage.getMessageId())) {
+            Logger.d(TAG, "Ignoring messages #" + mtMessage.getMessageId());
+            return;
+        }
         try {
             TLObject intMessage = protoContext.deserializeMessage(new ByteArrayInputStream(mtMessage.getContent()));
             onMTProtoMessage(mtMessage.getMessageId(), intMessage);
@@ -175,8 +239,12 @@ public class MTProto {
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
                     requestSchedule();
                 } else if (badMessage.getErrorCode() == ERROR_BAD_SERVER_SALT) {
-                    serverSalt = ((MTBadServerSalt) badMessage).getNewSalt();
-                    scheduller.resendMessage(badMessage.getBadMsgId());
+                    long salt = ((MTBadServerSalt) badMessage).getNewSalt();
+                    // Sync time
+                    long delta = System.nanoTime() / 1000000 - time;
+                    TimeOverlord.getInstance().onMethodExecuted(badMessage.getBadMsgId(), msgId, delta);
+                    state.addCurrentSalt(salt);
+                    scheduller.resendAsNewMessage(badMessage.getBadMsgId());
                     requestSchedule();
                 } else if (badMessage.getErrorCode() == ERROR_BAD_CONTAINER ||
                         badMessage.getErrorCode() == ERROR_CONTAINER_MSG_ID_INCORRECT) {
@@ -251,9 +319,45 @@ public class MTProto {
                 long delta = System.nanoTime() / 1000000 - time;
                 TimeOverlord.getInstance().onMethodExecuted(pong.getMessageId(), msgId, delta);
             }
-        } else {
-            Logger.d(TAG, object.toString());
+        } else if (object instanceof MTFutureSalts) {
+            MTFutureSalts salts = (MTFutureSalts) object;
+            scheduller.onMessageConfirmed(salts.getRequestId());
+
+            long time = scheduller.getMessageIdGenerationTime(salts.getRequestId());
+
+            if (time > 0) {
+                KnownSalt[] knownSalts = new KnownSalt[salts.getSalts().size()];
+                for (int i = 0; i < knownSalts.length; i++) {
+                    MTFutureSalt salt = salts.getSalts().get(i);
+                    knownSalts[i] = new KnownSalt(salt.getValidSince(), salt.getValidUntil(), salt.getSalt());
+                }
+
+                long delta = System.nanoTime() / 1000000 - time;
+                TimeOverlord.getInstance().onForcedServerTimeArrived(salts.getNow(), delta);
+                state.mergeKnownSalts(salts.getNow(), knownSalts);
+            }
+        } else if (object instanceof MTMessageDetailedInfo) {
+            MTMessageDetailedInfo detailedInfo = (MTMessageDetailedInfo) object;
+            if (receivedMessages.contains(detailedInfo.getAnswerMsgId())) {
+                scheduller.confirmMessage(detailedInfo.getAnswerMsgId());
+            } else {
+                long time = scheduller.getMessageIdGenerationTime(detailedInfo.getMsgId());
+                if (time > 0) {
+                    scheduller.postMessage(new MTNeedResendMessage(new long[]{detailedInfo.getAnswerMsgId()}), false, RESEND_TIMEOUT);
+                } else {
+                    scheduller.confirmMessage(detailedInfo.getAnswerMsgId());
+                }
+            }
+        } else if (object instanceof MTNewMessageDetailedInfo) {
+            MTNewMessageDetailedInfo detailedInfo = (MTNewMessageDetailedInfo) object;
+            if (receivedMessages.contains(detailedInfo.getAnswerMsgId())) {
+                scheduller.confirmMessage(detailedInfo.getAnswerMsgId());
+            } else {
+                scheduller.postMessage(new MTNeedResendMessage(new long[]{detailedInfo.getAnswerMsgId()}), false, RESEND_TIMEOUT);
+            }
         }
+
+        Logger.d(TAG, "Arrived: " + object.toString());
     }
 
     public void requestSchedule() {
@@ -263,8 +367,9 @@ public class MTProto {
     }
 
     private byte[] encrypt(int seqNo, long messageId, byte[] content) throws IOException {
+        long salt = state.findActualSalt((int) (TimeOverlord.getInstance().getServerTime() / 1000));
         ByteArrayOutputStream messageBody = new ByteArrayOutputStream();
-        writeByteArray(serverSalt, messageBody);
+        writeLong(salt, messageBody);
         writeByteArray(session, messageBody);
         writeLong(messageId, messageBody);
         writeInt(seqNo, messageBody);
@@ -370,14 +475,15 @@ public class MTProto {
                 synchronized (contexts) {
                     TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
                     if (currentContexts.length != 0) {
-                        context = currentContexts[0];
+                        roundRobin = (roundRobin + 1) % currentContexts.length;
+                        context = currentContexts[roundRobin];
                     } else {
                         continue;
                     }
                 }
 
                 synchronized (scheduller) {
-                    PreparedPackage preparedPackage = scheduller.doSchedule();
+                    PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId());
                     if (preparedPackage == null) {
                         try {
                             long delay = scheduller.getSchedullerDelay();
@@ -394,6 +500,8 @@ public class MTProto {
                         byte[] data = encrypt(preparedPackage.getSeqNo(), preparedPackage.getMessageId(), preparedPackage.getContent());
                         if (!context.isClosed()) {
                             context.postMessage(data, false);
+                        } else {
+                            scheduller.onConnectionDies(context.getContextId());
                         }
                     } catch (IOException e) {
                         e.printStackTrace();
@@ -448,10 +556,12 @@ public class MTProto {
                 }
 
                 try {
-                    TcpContext context = new TcpContext(address, port, false, tcpListener);
+                    ConnectionInfo info = state.fetchConnectionInfo();
+                    TcpContext context = new TcpContext(info.getAddress(), info.getPort(), false, tcpListener);
                     if (isClosed) {
                         return;
                     }
+                    scheduller.postMessageDelayed(new MTPing(Entropy.generateRandomId()), false, PING_TIMEOUT, 0, context.getContextId());
                     synchronized (contexts) {
                         contexts.add(context);
                     }
@@ -512,6 +622,8 @@ public class MTProto {
             }
             Logger.w(TAG, "Received error: " + errorCode);
             context.close();
+            scheduller.onConnectionDies(context.getContextId());
+            requestSchedule();
             synchronized (contexts) {
                 contexts.remove(context);
                 contexts.notifyAll();
@@ -523,6 +635,8 @@ public class MTProto {
             if (isClosed) {
                 return;
             }
+            scheduller.onConnectionDies(context.getContextId());
+            requestSchedule();
             synchronized (contexts) {
                 contexts.remove(context);
                 contexts.notifyAll();
