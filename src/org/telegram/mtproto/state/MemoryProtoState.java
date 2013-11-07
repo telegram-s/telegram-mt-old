@@ -31,7 +31,7 @@ public class MemoryProtoState extends AbsMTProtoState {
     }
 
     @Override
-    public KnownSalt[] getKnownSalts() {
+    public KnownSalt[] readKnownSalts() {
         return salts;
     }
 

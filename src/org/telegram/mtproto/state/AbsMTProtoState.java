@@ -3,7 +3,6 @@ package org.telegram.mtproto.state;
 import org.telegram.mtproto.time.TimeOverlord;
 
 import java.util.HashMap;
-import java.util.HashSet;
 
 /**
  * Created with IntelliJ IDEA.
@@ -17,12 +16,12 @@ public abstract class AbsMTProtoState {
 
     public abstract ConnectionInfo fetchConnectionInfo();
 
-    public abstract KnownSalt[] getKnownSalts();
+    public abstract KnownSalt[] readKnownSalts();
 
     protected abstract void writeKnownSalts(KnownSalt[] salts);
 
     public void mergeKnownSalts(int currentTime, KnownSalt[] salts) {
-        KnownSalt[] knownSalts = getKnownSalts();
+        KnownSalt[] knownSalts = readKnownSalts();
         HashMap<Long, KnownSalt> ids = new HashMap<Long, KnownSalt>();
         for (KnownSalt s : knownSalts) {
             if (s.getValidUntil() < currentTime) {
@@ -45,7 +44,7 @@ public abstract class AbsMTProtoState {
     }
 
     public long findActualSalt(int time) {
-        KnownSalt[] knownSalts = getKnownSalts();
+        KnownSalt[] knownSalts = readKnownSalts();
         for (KnownSalt salt : knownSalts) {
             if (salt.getValidSince() <= time && time <= salt.getValidUntil()) {
                 return salt.getSalt();
@@ -57,7 +56,7 @@ public abstract class AbsMTProtoState {
 
     public int maximumCachedSalts(int time) {
         int count = 0;
-        for (KnownSalt salt : getKnownSalts()) {
+        for (KnownSalt salt : readKnownSalts()) {
             if (salt.getValidSince() > time) {
                 count++;
             }
@@ -67,7 +66,7 @@ public abstract class AbsMTProtoState {
 
     public int maximumCachedSaltsTime() {
         int max = 0;
-        for (KnownSalt salt : getKnownSalts()) {
+        for (KnownSalt salt : readKnownSalts()) {
             max = Math.max(max, salt.getValidUntil());
         }
         return max;
