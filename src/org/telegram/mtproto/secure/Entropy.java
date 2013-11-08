@@ -2,6 +2,8 @@ package org.telegram.mtproto.secure;
 
 import java.security.SecureRandom;
 
+import static org.telegram.mtproto.secure.CryptoUtils.xor;
+
 /**
  * Created with IntelliJ IDEA.
  * User: ex3ndr
@@ -15,8 +17,16 @@ public final class Entropy {
         return random.generateSeed(size);
     }
 
+    public static byte[] generateSeed(byte[] sourceSeed) {
+        return xor(random.generateSeed(sourceSeed.length), sourceSeed);
+    }
+
     public static long generateRandomId() {
         return random.nextLong();
+    }
+
+    public static int randomInt() {
+        return random.nextInt();
     }
 
     public static void feedEntropy(byte[] data) {
