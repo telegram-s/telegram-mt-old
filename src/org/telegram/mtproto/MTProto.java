@@ -243,7 +243,7 @@ public class MTProto {
                     // Sync time
                     long delta = System.nanoTime() / 1000000 - time;
                     TimeOverlord.getInstance().onMethodExecuted(badMessage.getBadMsgId(), msgId, delta);
-                    state.addCurrentSalt(salt);
+                    state.badServerSalt(salt);
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
                     requestSchedule();
                 } else if (badMessage.getErrorCode() == ERROR_BAD_CONTAINER ||
