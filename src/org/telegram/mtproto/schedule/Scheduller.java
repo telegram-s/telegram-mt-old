@@ -27,7 +27,7 @@ public class Scheduller {
 
     private static final int SCHEDULLER_TIMEOUT = 15 * 1000;//15 sec
 
-    private static final long CONFIRM_TIMEOUT = 60 * 1000 * 1000 * 1000L;//60 sec
+    private static final long CONFIRM_TIMEOUT = 60 * 1000;//60 sec
 
     private static final int MAX_WORKLOAD_SIZE = 1024;
     private static final long RETRY_TIMEOUT = 15 * 1000;
@@ -86,7 +86,7 @@ public class Scheduller {
         SchedullerPackage schedullerPackage = new SchedullerPackage(id);
         schedullerPackage.object = object;
         schedullerPackage.addTime = getCurrentTime();
-        schedullerPackage.scheduleTime = schedullerPackage.addTime + delay * 1000L * 1000L;
+        schedullerPackage.scheduleTime = schedullerPackage.addTime + delay;
         schedullerPackage.expiresTime = schedullerPackage.scheduleTime + timeout;
         schedullerPackage.isRpc = isRpc;
         schedullerPackage.queuedToChannel = contextId;
@@ -111,7 +111,7 @@ public class Scheduller {
                 if (schedullerPackage.scheduleTime <= time) {
                     minDelay = 0;
                 } else {
-                    long delta = (time - schedullerPackage.scheduleTime) / (1000L * 1000L);
+                    long delta = schedullerPackage.scheduleTime - time;
                     minDelay = Math.min(delta, minDelay);
                 }
             }
@@ -169,7 +169,7 @@ public class Scheduller {
                 schedullerPackage.seqNo = 0;
                 schedullerPackage.relatedMessageIds.clear();
                 schedullerPackage.state = STATE_QUEUED;
-                schedullerPackage.scheduleTime = getCurrentTime() + delay * 1000L * 1000L;
+                schedullerPackage.scheduleTime = getCurrentTime() + delay;
             }
         }
     }
@@ -222,7 +222,7 @@ public class Scheduller {
     public void confirmMessage(long msgId) {
         confirmedMessages.add(msgId);
         if (firstConfirmTime == 0) {
-            firstConfirmTime = System.nanoTime();
+            firstConfirmTime = getCurrentTime();
         }
     }
 

@@ -463,10 +463,12 @@ public class MTProto {
         @Override
         public void run() {
             while (!isClosed) {
+                Logger.d(TAG, "Scheduller Iteration");
                 synchronized (scheduller) {
                     if (contexts.size() == 0) {
                         try {
                             long delay = scheduller.getSchedullerDelay();
+                            Logger.d(TAG, "Scheduller delay: " + delay);
                             if (delay > 0) {
                                 scheduller.wait(delay);
                             }
@@ -487,11 +489,13 @@ public class MTProto {
                     }
                 }
 
+                Logger.d(TAG, "Getting packages");
                 synchronized (scheduller) {
                     PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId());
                     if (preparedPackage == null) {
                         try {
                             long delay = scheduller.getSchedullerDelay();
+                            Logger.d(TAG, "Scheduller delay: " + delay);
                             if (delay > 0) {
                                 scheduller.wait(delay);
                             }
@@ -528,6 +532,7 @@ public class MTProto {
         @Override
         public void run() {
             while (!isClosed) {
+                Logger.d(TAG, "Response Iteration");
                 synchronized (inQueue) {
                     if (inQueue.isEmpty()) {
                         try {
@@ -554,6 +559,7 @@ public class MTProto {
         @Override
         public void run() {
             while (!isClosed) {
+                Logger.d(TAG, "Connection Fixer Iteration");
                 synchronized (contexts) {
                     if (contexts.size() >= desiredConnectionCount) {
                         try {

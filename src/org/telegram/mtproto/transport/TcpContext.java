@@ -179,6 +179,7 @@ public class TcpContext {
         public void run() {
             try {
                 while (!isClosed && !isInterrupted()) {
+                    Logger.d(TAG, "Reader Iteration");
                     try {
                         if (socket.isClosed()) {
                             breakContext();
@@ -308,6 +309,7 @@ public class TcpContext {
         @Override
         public void run() {
             while (!isBroken) {
+                Logger.d(TAG, "Writer Iteration");
                 Package p;
                 synchronized (packages) {
                     p = packages.poll();
