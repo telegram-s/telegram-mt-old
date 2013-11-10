@@ -8,15 +8,33 @@ package org.telegram.mtproto.log;
  */
 public class Logger {
 
+    private static LogInterface logInterface;
+
+    public static void registerInterface(LogInterface logInterface) {
+        Logger.logInterface = logInterface;
+    }
+
     public static void w(String tag, String message) {
-        System.out.println(tag + ":" + message);
+        if (logInterface != null) {
+            logInterface.w(tag, message);
+        } else {
+            System.out.println(tag + ":" + message);
+        }
     }
 
     public static void d(String tag, String message) {
-        System.out.println(tag + ":" + message);
+        if (logInterface != null) {
+            logInterface.d(tag, message);
+        } else {
+            System.out.println(tag + ":" + message);
+        }
     }
 
-    public static void t(String tag, Throwable t) {
-        t.printStackTrace();
+    public static void e(String tag, Throwable t) {
+        if (logInterface != null) {
+            logInterface.e(tag, t);
+        } else {
+            t.printStackTrace();
+        }
     }
 }

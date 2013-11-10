@@ -17,6 +17,8 @@ import java.util.zip.CRC32;
  */
 public class TcpContext {
 
+    private static final int MAX_PACKED_SIZE = 1024 * 1024 * 1024;//1 MB
+
     private class Package {
         public Package() {
 
@@ -122,12 +124,12 @@ public class TcpContext {
             try {
                 readerThread.interrupt();
             } catch (Exception e) {
-                Logger.t(TAG, e);
+                Logger.e(TAG, e);
             }
             try {
                 writerThread.interrupt();
             } catch (Exception e) {
-                Logger.t(TAG, e);
+                Logger.e(TAG, e);
             }
         }
     }
@@ -156,12 +158,12 @@ public class TcpContext {
             try {
                 readerThread.interrupt();
             } catch (Exception e) {
-                Logger.t(TAG, e);
+                Logger.e(TAG, e);
             }
             try {
                 writerThread.interrupt();
             } catch (Exception e) {
-                Logger.t(TAG, e);
+                Logger.e(TAG, e);
             }
         }
 
@@ -204,13 +206,12 @@ public class TcpContext {
                             }
 
                             if ((length >> 31) != 0) {
-                                Logger.d(TAG, "fast confirm: " + length);
+                                Logger.d(TAG, "fast confirm: " + Integer.toHexString(length));
                                 callback.onFastConfirm(length);
                                 continue;
                             }
 
-                            //1 MB
-                            if (length >= 1024 * 1024 * 1024) {
+                            if (length >= MAX_PACKED_SIZE) {
                                 Logger.d(TAG, "Too big package");
                                 breakContext();
                                 return;
@@ -219,7 +220,7 @@ public class TcpContext {
                             int packetIndex = readInt(stream);
                             if (length == 4) {
                                 onError(packetIndex);
-                                Logger.d(TAG, "Received error");
+                                Logger.d(TAG, "Received error: " + packetIndex);
                                 breakContext();
                                 return;
                             }
@@ -243,34 +244,52 @@ public class TcpContext {
 
                             receivedPackets++;
                         } else {
-                            int headerLen = readByte(stream);
+                            int length = readByte(stream);
 
-                            if (headerLen == 0x7F) {
-                                headerLen = readByte(stream) + (readByte(stream) << 8) + (readByte(stream) << 16);
+                            if (length >> 7 != 0) {
+                                length = (length << 24) + (readByte(stream) << 16) + (readByte(stream) << 8) + (readByte(stream) << 0);
+                                Logger.d(TAG, "fast confirm: " + Integer.toHexString(length));
+                                callback.onFastConfirm(length);
+                                continue;
+                            } else {
+                                if (length == 0x7F) {
+                                    length = readByte(stream) + (readByte(stream) << 8) + (readByte(stream) << 16);
+                                }
+                                int len = length * 4;
+
+                                if (length == 4) {
+                                    int error = readInt(stream);
+                                    onError(error);
+                                    Logger.d(TAG, "Received error: " + error);
+                                    breakContext();
+                                    return;
+                                }
+
+                                if (length >= MAX_PACKED_SIZE) {
+                                    Logger.d(TAG, "Too big package");
+                                    breakContext();
+                                    return;
+                                }
+
+                                pkg = readBytes(len, READ_TIMEOUT, stream);
                             }
-                            int len = headerLen * 4;
-                            pkg = readBytes(len, READ_TIMEOUT, stream);
                         }
-                        if (pkg.length == 4) {
-                            int message = readInt(pkg);
-                            onError(message);
-                        } else {
-                            try {
-                                onMessage(pkg);
-                            } catch (Exception e) {
-                                Logger.t(TAG, e);
-                                Logger.d(TAG, "Message processing error");
-                                breakContext();
-                            }
+                        try {
+                            onMessage(pkg);
+                        } catch (Throwable t) {
+                            Logger.e(TAG, t);
+                            Logger.d(TAG, "Message processing error");
+                            breakContext();
+                            return;
                         }
                     } catch (IOException e) {
-                        Logger.t(TAG, e);
+                        Logger.e(TAG, e);
                         breakContext();
                         return;
                     }
                 }
             } catch (Exception e) {
-                Logger.t(TAG, e);
+                Logger.e(TAG, e);
                 breakContext();
             }
         }
@@ -335,23 +354,44 @@ public class TcpContext {
                         stream.flush();
                     } else {
                         OutputStream stream = socket.getOutputStream();
-                        if (data.length / 4 >= 0x7F) {
-                            int len = data.length / 4;
-                            writeByte(0x7F, stream);
-                            writeByte(len & 0xFF, stream);
-                            writeByte((len >> 8) & 0xFF, stream);
-                            writeByte((len >> 16) & 0xFF, stream);
+                        if (useConfimFlag) {
+                            if (data.length / 4 >= 0x7F) {
+                                int len = data.length / 4;
+                                writeByte(0xFF, stream);
+                                writeByte(len & 0xFF, stream);
+                                writeByte((len >> 8) & 0xFF, stream);
+                                writeByte((len >> 16) & 0xFF, stream);
+                            } else {
+                                writeByte((data.length / 4) | (1 << 7), stream);
+                            }
                         } else {
-                            writeByte(data.length / 4, stream);
+                            if (data.length / 4 >= 0x7F) {
+                                int len = data.length / 4;
+                                writeByte(0x7F, stream);
+                                writeByte(len & 0xFF, stream);
+                                writeByte((len >> 8) & 0xFF, stream);
+                                writeByte((len >> 16) & 0xFF, stream);
+                            } else {
+                                writeByte(data.length / 4, stream);
+                            }
                         }
                         writeByteArray(data, stream);
                         stream.flush();
                     }
                     sentPackets++;
                 } catch (Exception e) {
-                    Logger.t(TAG, e);
+                    Logger.e(TAG, e);
                     breakContext();
                 }
+            }
+        }
+    }
+
+    private class DieThread extends Thread {
+        @Override
+        public void run() {
+            while (!isBroken) {
+
             }
         }
     }

@@ -162,7 +162,7 @@ public class Authorizer {
                 if (!arrayEq(result.getNewNonceHash(), newNonceHash))
                     throw new TransportSecurityException();
 
-                byte[] serverSalt = xor(substring(newNonce, 0, 8), substring(serverNonce, 0, 8));
+                long serverSalt = readLong(xor(substring(newNonce, 0, 8), substring(serverNonce, 0, 8)), 0);
 
                 return new PqAuth(authKey, serverSalt, context.getSocket());
             } else if (result instanceof DhGenRetry) {

@@ -48,6 +48,11 @@ public abstract class AbsMTProtoState {
         writeKnownSalts(new KnownSalt[]{new KnownSalt(time, time + 30 * 60, salt)});
     }
 
+    public void initialServerSalt(long salt) {
+        int time = (int) (TimeOverlord.getInstance().getServerTime() / 1000);
+        writeKnownSalts(new KnownSalt[]{new KnownSalt(time, time + 30 * 60, salt)});
+    }
+
     public long findActualSalt(int time) {
         KnownSalt[] knownSalts = readKnownSalts();
         for (KnownSalt salt : knownSalts) {

@@ -16,4 +16,6 @@ public interface MTProtoCallback {
     public void onRpcResult(int callId, byte[] response, MTProto proto);
 
     public void onRpcError(int callId, int errorCode, String message, MTProto proto);
+
+    public void onConfirmed(int callId);
 }

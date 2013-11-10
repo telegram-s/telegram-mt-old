@@ -1,7 +1,6 @@
 package org.telegram.mtproto;
 
 import org.telegram.mtproto.log.Logger;
-import org.telegram.mtproto.pq.PqAuth;
 import org.telegram.mtproto.schedule.PreparedPackage;
 import org.telegram.mtproto.schedule.Scheduller;
 import org.telegram.mtproto.secure.Entropy;
@@ -16,7 +15,6 @@ import org.telegram.tl.DeserializeException;
 import org.telegram.tl.StreamingUtils;
 import org.telegram.tl.TLMethod;
 import org.telegram.tl.TLObject;
-import sun.security.x509.IPAddressName;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -169,12 +167,12 @@ public class MTProto {
     }
 
 
-    public int sendRpcMessage(TLMethod request, long timeout) {
-        return sendMessage(request, timeout, true);
+    public int sendRpcMessage(TLMethod request, long timeout, boolean highPriority) {
+        return sendMessage(request, timeout, true, highPriority);
     }
 
-    public int sendMessage(TLObject request, long timeout, boolean isRpc) {
-        int id = scheduller.postMessage(request, isRpc, timeout);
+    public int sendMessage(TLObject request, long timeout, boolean isRpc, boolean highPriority) {
+        int id = scheduller.postMessage(request, isRpc, timeout, highPriority);
         synchronized (scheduller) {
             scheduller.notifyAll();
         }
@@ -209,11 +207,11 @@ public class MTProto {
         }
     }
 
-    public void onApiMessage(byte[] data) {
+    private void onApiMessage(byte[] data) {
         callback.onApiMessage(data, this);
     }
 
-    public void onMTProtoMessage(long msgId, TLObject object) {
+    private void onMTProtoMessage(long msgId, TLObject object) {
         if (object instanceof MTBadMessage) {
             MTBadMessage badMessage = (MTBadMessage) object;
             Logger.d(TAG, "BadMessage: " + badMessage.getErrorCode());
@@ -259,6 +257,10 @@ public class MTProto {
             MTMsgsAck ack = (MTMsgsAck) object;
             for (Long ackMsgId : ack.getMessages()) {
                 scheduller.onMessageConfirmed(ackMsgId);
+                int id = scheduller.mapSchedullerId(ackMsgId);
+                if (id > 0) {
+                    callback.onConfirmed(id);
+                }
             }
         } else if (object instanceof MTRpcResult) {
             MTRpcResult result = (MTRpcResult) object;
@@ -366,7 +368,7 @@ public class MTProto {
         }
     }
 
-    private byte[] encrypt(int seqNo, long messageId, byte[] content) throws IOException {
+    private EncryptedMessage encrypt(int seqNo, long messageId, byte[] content) throws IOException {
         long salt = state.findActualSalt((int) (TimeOverlord.getInstance().getServerTime() / 1000));
         ByteArrayOutputStream messageBody = new ByteArrayOutputStream();
         writeLong(salt, messageBody);
@@ -394,7 +396,10 @@ public class MTProto {
 
         byte[] encoded = AES256IGEEncrypt(align(innerData, 16), aesIv, aesKey);
         writeByteArray(encoded, out);
-        return out.toByteArray();
+        EncryptedMessage res = new EncryptedMessage();
+        res.data = out.toByteArray();
+        res.fastConfirm = fastConfirm;
+        return res;
     }
 
     private MTMessage decrypt(byte[] data) throws IOException {
@@ -497,12 +502,16 @@ public class MTProto {
                     }
 
                     try {
-                        byte[] data = encrypt(preparedPackage.getSeqNo(), preparedPackage.getMessageId(), preparedPackage.getContent());
+                        EncryptedMessage msg = encrypt(preparedPackage.getSeqNo(), preparedPackage.getMessageId(), preparedPackage.getContent());
+                        if (preparedPackage.isHighPriority()) {
+                            scheduller.registerFastConfirm(preparedPackage.getMessageId(), msg.fastConfirm);
+                        }
                         if (!context.isClosed()) {
-                            context.postMessage(data, false);
+                            context.postMessage(msg.data, preparedPackage.isHighPriority());
                         } else {
                             scheduller.onConnectionDies(context.getContextId());
                         }
+                        Logger.d(TAG, "Sent: " + Integer.toHexString(msg.fastConfirm));
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
@@ -561,7 +570,7 @@ public class MTProto {
                     if (isClosed) {
                         return;
                     }
-                    scheduller.postMessageDelayed(new MTPing(Entropy.generateRandomId()), false, PING_TIMEOUT, 0, context.getContextId());
+                    scheduller.postMessageDelayed(new MTPing(Entropy.generateRandomId()), false, PING_TIMEOUT, 0, context.getContextId(), false);
                     synchronized (contexts) {
                         contexts.add(context);
                     }
@@ -602,7 +611,7 @@ public class MTProto {
                         }
                     } catch (DeserializeException e) {
                         // Ignore this
-                        Logger.t(TAG, e);
+                        Logger.e(TAG, e);
                     }
                 } else {
                     inQueue.add(decrypted);
@@ -611,7 +620,7 @@ public class MTProto {
                     }
                 }
             } catch (IOException e) {
-                Logger.t(TAG, e);
+                Logger.e(TAG, e);
             }
         }
 
@@ -620,14 +629,8 @@ public class MTProto {
             if (isClosed) {
                 return;
             }
-            Logger.w(TAG, "Received error: " + errorCode);
-            context.close();
-            scheduller.onConnectionDies(context.getContextId());
-            requestSchedule();
-            synchronized (contexts) {
-                contexts.remove(context);
-                contexts.notifyAll();
-            }
+
+            // Fully maintained at transport level: TcpContext dies
         }
 
         @Override
@@ -648,6 +651,16 @@ public class MTProto {
             if (isClosed) {
                 return;
             }
+            scheduller.onMessageFastConfirmed(hash);
+            int[] ids = scheduller.mapFastConfirm(hash);
+            for (int id : ids) {
+                callback.onConfirmed(id);
+            }
         }
+    }
+
+    private class EncryptedMessage {
+        public byte[] data;
+        public int fastConfirm;
     }
 }

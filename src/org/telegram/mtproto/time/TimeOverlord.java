@@ -58,7 +58,6 @@ public class TimeOverlord {
     }
 
     public void onServerTimeArrived(long serverTime, long duration) {
-        Logger.d("Time", "Sync time: " + duration);
         if (duration < 0) {
             return;
         }
@@ -72,8 +71,6 @@ public class TimeOverlord {
     }
 
     public void onMethodExecuted(long sentId, long responseId, long duration) {
-        Logger.d("Time", "onMethodExecuted: " + duration);
-
         if (duration < 0) {
             return;
         }

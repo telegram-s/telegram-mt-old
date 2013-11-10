@@ -27,12 +27,16 @@ public class Scheduller {
 
     private static final int SCHEDULLER_TIMEOUT = 15 * 1000;//15 sec
 
+    private static final long CONFIRM_TIMEOUT = 60 * 1000 * 1000 * 1000L;//60 sec
+
     private static final int MAX_WORKLOAD_SIZE = 1024;
     private static final long RETRY_TIMEOUT = 15 * 1000;
 
     private SortedMap<Integer, SchedullerPackage> messages = Collections.synchronizedSortedMap(new TreeMap<Integer, SchedullerPackage>());
     private HashSet<Long> currentMessageGeneration = new HashSet<Long>();
     private HashSet<Long> confirmedMessages = new HashSet<Long>();
+
+    private long firstConfirmTime = 0;
 
     private long lastMessageId = 0;
     private int seqNo = 0;
@@ -53,7 +57,6 @@ public class Scheduller {
         }
         idGenerationTime.put(messageId, getCurrentTime());
         currentMessageGeneration.add(messageId);
-        System.out.println("Generated time: " + new Date((messageId >> 32) * 1000).toString());
         return messageId;
     }
 
@@ -78,11 +81,7 @@ public class Scheduller {
         return 0;
     }
 
-    public int postMessageDelayed(TLObject object, boolean isRpc, long timeout, int delay) {
-        return postMessageDelayed(object, isRpc, timeout, delay, -1);
-    }
-
-    public int postMessageDelayed(TLObject object, boolean isRpc, long timeout, int delay, int contextId) {
+    public int postMessageDelayed(TLObject object, boolean isRpc, long timeout, int delay, int contextId, boolean highPrioroty) {
         int id = messagesIds.incrementAndGet();
         SchedullerPackage schedullerPackage = new SchedullerPackage(id);
         schedullerPackage.object = object;
@@ -91,12 +90,17 @@ public class Scheduller {
         schedullerPackage.expiresTime = schedullerPackage.scheduleTime + timeout;
         schedullerPackage.isRpc = isRpc;
         schedullerPackage.queuedToChannel = contextId;
+        schedullerPackage.priority = highPrioroty ? PRIORITY_HIGH : PRIORITY_NORMAL;
         messages.put(id, schedullerPackage);
         return id;
     }
 
     public int postMessage(TLObject object, boolean isApi, long timeout) {
-        return postMessageDelayed(object, isApi, timeout, 0);
+        return postMessageDelayed(object, isApi, timeout, 0, -1, false);
+    }
+
+    public int postMessage(TLObject object, boolean isApi, long timeout, boolean highPrioroty) {
+        return postMessageDelayed(object, isApi, timeout, 0, -1, highPrioroty);
     }
 
     public long getSchedullerDelay() {
@@ -113,6 +117,21 @@ public class Scheduller {
             }
         }
         return minDelay;
+    }
+
+    public void registerFastConfirm(long msgId, int fastConfirm) {
+        for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
+            boolean contains = false;
+            for (Long relatedMsgId : schedullerPackage.relatedMessageIds) {
+                if (relatedMsgId == msgId) {
+                    contains = true;
+                    break;
+                }
+            }
+            if (contains) {
+                schedullerPackage.relatedFastConfirm.add(fastConfirm);
+            }
+        }
     }
 
     public int mapSchedullerId(long msgId) {
@@ -144,14 +163,7 @@ public class Scheduller {
 
     public void resendAsNewMessageDelayed(long msgId, int delay) {
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
-            boolean contains = false;
-            for (Long relatedMsgId : schedullerPackage.relatedMessageIds) {
-                if (relatedMsgId == msgId) {
-                    contains = true;
-                    break;
-                }
-            }
-            if (contains) {
+            if (schedullerPackage.relatedMessageIds.contains(msgId)) {
                 schedullerPackage.idGenerationTime = 0;
                 schedullerPackage.messageId = 0;
                 schedullerPackage.seqNo = 0;
@@ -164,16 +176,35 @@ public class Scheduller {
 
     public void resendMessage(long msgId) {
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
-            boolean contains = false;
-            for (Long relatedMsgId : schedullerPackage.relatedMessageIds) {
-                if (relatedMsgId == msgId) {
-                    contains = true;
-                    break;
-                }
-            }
-            if (contains) {
+            if (schedullerPackage.relatedMessageIds.contains(msgId)) {
                 schedullerPackage.relatedMessageIds.clear();
                 schedullerPackage.state = STATE_QUEUED;
+            }
+        }
+    }
+
+    public int[] mapFastConfirm(int fastConfirm) {
+        ArrayList<Integer> res = new ArrayList<Integer>();
+        for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
+            if (schedullerPackage.state == STATE_SENT) {
+                if (schedullerPackage.relatedFastConfirm.contains(fastConfirm)) {
+                    res.add(schedullerPackage.id);
+                }
+            }
+        }
+        int[] res2 = new int[res.size()];
+        for (int i = 0; i < res2.length; i++) {
+            res2[i] = res.get(i);
+        }
+        return res2;
+    }
+
+    public void onMessageFastConfirmed(int fastConfirm) {
+        for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
+            if (schedullerPackage.state == STATE_SENT) {
+                if (schedullerPackage.relatedFastConfirm.contains(fastConfirm)) {
+                    schedullerPackage.state = STATE_CONFIRMED;
+                }
             }
         }
     }
@@ -181,14 +212,7 @@ public class Scheduller {
     public void onMessageConfirmed(long msgId) {
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             if (schedullerPackage.state == STATE_SENT) {
-                boolean contains = false;
-                for (Long relatedMsgId : schedullerPackage.relatedMessageIds) {
-                    if (relatedMsgId == msgId) {
-                        contains = true;
-                        break;
-                    }
-                }
-                if (contains) {
+                if (schedullerPackage.relatedMessageIds.contains(msgId)) {
                     schedullerPackage.state = STATE_CONFIRMED;
                 }
             }
@@ -197,6 +221,9 @@ public class Scheduller {
 
     public void confirmMessage(long msgId) {
         confirmedMessages.add(msgId);
+        if (firstConfirmTime == 0) {
+            firstConfirmTime = System.nanoTime();
+        }
     }
 
     public void unableToSendMessage(long messageId) {
@@ -216,22 +243,21 @@ public class Scheduller {
         }
     }
 
-    public PreparedPackage doSchedule(int contextId) {
-        int totalSize = 0;
-        long time = getCurrentTime();
+    private ArrayList<SchedullerPackage> actualPackages(int contextId) {
         ArrayList<SchedullerPackage> foundedPackages = new ArrayList<SchedullerPackage>();
+        long time = getCurrentTime();
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             if (schedullerPackage.queuedToChannel != -1 && contextId != schedullerPackage.queuedToChannel) {
                 continue;
             }
             boolean isPendingPackage = false;
             if (schedullerPackage.state == STATE_QUEUED) {
-                if (schedullerPackage.scheduleTime < time) {
+                if (schedullerPackage.scheduleTime <= time) {
                     isPendingPackage = true;
                 }
             } else if (schedullerPackage.state == STATE_SENT) {
-                if (getCurrentTime() < schedullerPackage.expiresTime) {
-                    if (getCurrentTime() - schedullerPackage.lastAttemptTime > RETRY_TIMEOUT) {
+                if (getCurrentTime() <= schedullerPackage.expiresTime) {
+                    if (getCurrentTime() - schedullerPackage.lastAttemptTime >= RETRY_TIMEOUT) {
                         isPendingPackage = true;
                     }
                 }
@@ -253,25 +279,60 @@ public class Scheduller {
                 }
 
                 foundedPackages.add(schedullerPackage);
-                totalSize += schedullerPackage.serialized.length;
+            }
+        }
+        return foundedPackages;
+    }
 
+    public PreparedPackage doSchedule(int contextId) {
+        ArrayList<SchedullerPackage> foundedPackages = actualPackages(contextId);
+
+        if (foundedPackages.size() == 0 &&
+                (confirmedMessages.size() == 0 || (System.nanoTime() - firstConfirmTime) < CONFIRM_TIMEOUT)) {
+            return null;
+        }
+
+        boolean useHighPriority = false;
+
+        for (SchedullerPackage p : foundedPackages) {
+            if (p.priority == PRIORITY_HIGH) {
+                useHighPriority = true;
+                break;
+            }
+        }
+
+        ArrayList<SchedullerPackage> packages = new ArrayList<SchedullerPackage>();
+
+        if (useHighPriority) {
+            Logger.d("Scheduller", "Using high priority scheduling");
+            int totalSize = 0;
+            for (SchedullerPackage p : foundedPackages) {
+                if (p.priority == PRIORITY_HIGH) {
+                    packages.add(p);
+                    totalSize += p.serialized.length;
+                    if (totalSize > MAX_WORKLOAD_SIZE) {
+                        break;
+                    }
+                }
+            }
+        } else {
+            int totalSize = 0;
+            for (SchedullerPackage p : foundedPackages) {
+                packages.add(p);
+                totalSize += p.serialized.length;
                 if (totalSize > MAX_WORKLOAD_SIZE) {
                     break;
                 }
             }
         }
 
-        if (foundedPackages.size() == 0 && confirmedMessages.size() == 0) {
-            return null;
-        }
-
-        Logger.d("Scheduller", "PackageSize: " + totalSize + ", count: " + foundedPackages.size());
+        Logger.d("Scheduller", "Iteration: count: " + packages.size() + ", confirm:" + confirmedMessages.size());
 
         if (foundedPackages.size() == 0 && confirmedMessages.size() != 0) {
             MTMsgsAck ack = new MTMsgsAck(confirmedMessages.toArray(new Long[0]));
             confirmedMessages.clear();
             try {
-                return new PreparedPackage(generateSeqNoWeak(), generateMessageId(), ack.serialize());
+                return new PreparedPackage(generateSeqNoWeak(), generateMessageId(), ack.serialize(), useHighPriority);
             } catch (IOException e) {
                 e.printStackTrace();
                 return null;
@@ -287,10 +348,10 @@ public class Scheduller {
             }
             schedullerPackage.writtenToChannel = contextId;
             schedullerPackage.lastAttemptTime = getCurrentTime();
-            return new PreparedPackage(schedullerPackage.seqNo, schedullerPackage.messageId, schedullerPackage.serialized);
+            return new PreparedPackage(schedullerPackage.seqNo, schedullerPackage.messageId, schedullerPackage.serialized, useHighPriority);
         } else {
             MTMessagesContainer container = new MTMessagesContainer();
-            if (confirmedMessages.size() > 0) {
+            if (confirmedMessages.size() > 0 && !useHighPriority) {
                 try {
                     MTMsgsAck ack = new MTMsgsAck(confirmedMessages.toArray(new Long[0]));
                     container.getMessages().add(new MTMessage(generateMessageId(), generateSeqNoWeak(), ack.serialize()));
@@ -319,7 +380,7 @@ public class Scheduller {
             }
 
             try {
-                return new PreparedPackage(containerSeq, containerMessageId, container.serialize());
+                return new PreparedPackage(containerSeq, containerMessageId, container.serialize(), useHighPriority);
             } catch (IOException e) {
                 // Might not happens
                 e.printStackTrace();
@@ -340,6 +401,9 @@ public class Scheduller {
             }
         }
     }
+
+    private static final int PRIORITY_HIGH = 1;
+    private static final int PRIORITY_NORMAL = 0;
 
     private static final int STATE_QUEUED = 0;
     private static final int STATE_SENT = 1;
@@ -367,10 +431,13 @@ public class Scheduller {
 
         public int state = STATE_QUEUED;
 
+        public int priority = PRIORITY_NORMAL;
+
         public long idGenerationTime;
         public long messageId;
         public int seqNo;
-        public ArrayList<Long> relatedMessageIds = new ArrayList<Long>();
+        public HashSet<Integer> relatedFastConfirm = new HashSet<Integer>();
+        public HashSet<Long> relatedMessageIds = new HashSet<Long>();
 
         public boolean isRpc;
     }

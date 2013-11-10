@@ -10,10 +10,10 @@ import java.net.Socket;
  */
 public class PqAuth {
     private byte[] authKey;
-    private byte[] serverSalt;
+    private long serverSalt;
     private Socket socket;
 
-    public PqAuth(byte[] authKey, byte[] serverSalt, Socket socket) {
+    public PqAuth(byte[] authKey, long serverSalt, Socket socket) {
         this.authKey = authKey;
         this.serverSalt = serverSalt;
         this.socket = socket;
@@ -23,7 +23,7 @@ public class PqAuth {
         return authKey;
     }
 
-    public byte[] getServerSalt() {
+    public long getServerSalt() {
         return serverSalt;
     }
 
