@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.telegram.mtproto.secure.CryptoUtils.*;
 import static org.telegram.tl.StreamingUtils.*;
@@ -34,7 +35,8 @@ import static org.telegram.tl.StreamingUtils.*;
  * Time: 8:14
  */
 public class MTProto {
-    private static final String TAG = "MTProto";
+
+    private static final AtomicInteger instanceIndex = new AtomicInteger(1000);
 
     private static final int MESSAGES_CACHE = 100;
     private static final int MESSAGES_CACHE_MIN = 10;
@@ -57,6 +59,9 @@ public class MTProto {
     private static final int FUTURE_REQUEST_COUNT = 64;
     private static final int FUTURE_MINIMAL = 5;
     private static final long FUTURE_TIMEOUT = 30 * 60 * 1000;//30 secs
+
+    private final String TAG;
+    private final int INSTANCE_INDEX;
 
     private MTProtoContext protoContext;
 
@@ -89,6 +94,8 @@ public class MTProto {
     private int roundRobin = 0;
 
     public MTProto(AbsMTProtoState state, MTProtoCallback callback, CallWrapper callWrapper) {
+        this.INSTANCE_INDEX = instanceIndex.incrementAndGet();
+        this.TAG = "MTProto#" + INSTANCE_INDEX;
         this.state = state;
         this.callback = callback;
         this.authKey = state.getAuthKey();
@@ -104,6 +111,11 @@ public class MTProto {
         this.schedullerThread.start();
         this.responseProcessor = new ResponseProcessor();
         this.responseProcessor.start();
+    }
+
+    @Override
+    public String toString() {
+        return "mtproto#" + INSTANCE_INDEX;
     }
 
     public void close() {
