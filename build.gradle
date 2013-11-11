@@ -17,3 +17,13 @@ if (project.hasProperty('buildIndex')) {
 } else {
      project.version = basicVersion + '-SNAPSHOT'
 }
+
+apply plugin: 'maven'
+
+uploadArchives {
+    repositories {
+        mavenDeployer {
+            repository(url: "http://192.168.1.12:8080/archiva/repository/internal/")
+        }
+    }
+}
