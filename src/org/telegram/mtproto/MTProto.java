@@ -178,6 +178,9 @@ public class MTProto {
         return true;
     }
 
+    public void forgetMessage(int id) {
+        scheduller.forgetMessage(id);
+    }
 
     public int sendRpcMessage(TLMethod request, long timeout, boolean highPriority) {
         return sendMessage(request, timeout, true, highPriority);

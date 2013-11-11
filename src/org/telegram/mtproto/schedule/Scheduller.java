@@ -245,6 +245,10 @@ public class Scheduller {
         }
     }
 
+    public void forgetMessage(int id) {
+        messages.remove(id);
+    }
+
     private ArrayList<SchedullerPackage> actualPackages(int contextId) {
         ArrayList<SchedullerPackage> foundedPackages = new ArrayList<SchedullerPackage>();
         long time = getCurrentTime();
@@ -262,6 +266,10 @@ public class Scheduller {
                     if (getCurrentTime() - schedullerPackage.lastAttemptTime >= RETRY_TIMEOUT) {
                         isPendingPackage = true;
                     }
+                }
+            } else if (schedullerPackage.state == STATE_SENT) {
+                if (getCurrentTime() > schedullerPackage.expiresTime) {
+                    forgetMessage(schedullerPackage.id);
                 }
             }
 
