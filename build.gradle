@@ -4,6 +4,8 @@ repositories {
     }
 }
 
+project.group = "org.telegram"
+
 apply plugin: 'java'
 
 dependencies {
