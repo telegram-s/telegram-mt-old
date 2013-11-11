@@ -220,9 +220,11 @@ public class Scheduller {
     }
 
     public void confirmMessage(long msgId) {
-        confirmedMessages.add(msgId);
-        if (firstConfirmTime == 0) {
-            firstConfirmTime = getCurrentTime();
+        synchronized (confirmedMessages) {
+            confirmedMessages.add(msgId);
+            if (firstConfirmTime == 0) {
+                firstConfirmTime = getCurrentTime();
+            }
         }
     }
 
@@ -329,8 +331,12 @@ public class Scheduller {
         Logger.d("Scheduller", "Iteration: count: " + packages.size() + ", confirm:" + confirmedMessages.size());
 
         if (foundedPackages.size() == 0 && confirmedMessages.size() != 0) {
-            MTMsgsAck ack = new MTMsgsAck(confirmedMessages.toArray(new Long[0]));
-            confirmedMessages.clear();
+            Long[] msgIds;
+            synchronized (confirmedMessages) {
+                msgIds = confirmedMessages.toArray(new Long[0]);
+                confirmedMessages.clear();
+            }
+            MTMsgsAck ack = new MTMsgsAck(msgIds);
             try {
                 return new PreparedPackage(generateSeqNoWeak(), generateMessageId(), ack.serialize(), useHighPriority);
             } catch (IOException e) {
@@ -353,7 +359,12 @@ public class Scheduller {
             MTMessagesContainer container = new MTMessagesContainer();
             if (confirmedMessages.size() > 0 && !useHighPriority) {
                 try {
-                    MTMsgsAck ack = new MTMsgsAck(confirmedMessages.toArray(new Long[0]));
+                    Long[] msgIds;
+                    synchronized (confirmedMessages) {
+                        msgIds = confirmedMessages.toArray(new Long[0]);
+                        confirmedMessages.clear();
+                    }
+                    MTMsgsAck ack = new MTMsgsAck(msgIds);
                     container.getMessages().add(new MTMessage(generateMessageId(), generateSeqNoWeak(), ack.serialize()));
                     confirmedMessages.clear();
                 } catch (IOException e) {
