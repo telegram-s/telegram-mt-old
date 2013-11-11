@@ -1,0 +1,19 @@
+repositories {
+    maven {
+        url "http://192.168.1.12:8080/archiva/repository/internal/"
+    }
+}
+
+apply plugin: 'java'
+
+dependencies {
+    classpath "org.telegram:tl-core:1.0.9"
+}
+
+def basicVersion = '1.0'
+
+if (project.hasProperty('buildIndex')) {
+     project.version = basicVersion + '.' + project.buildIndex
+} else {
+     project.version = basicVersion + '.debug'
+}
