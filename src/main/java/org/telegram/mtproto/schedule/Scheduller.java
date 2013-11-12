@@ -1,5 +1,6 @@
 package org.telegram.mtproto.schedule;
 
+import com.sun.jndi.url.iiop.iiopURLContext;
 import org.omg.PortableServer.ServantRetentionPolicy;
 import org.telegram.mtproto.CallWrapper;
 import org.telegram.mtproto.log.Logger;
@@ -21,6 +22,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Time: 8:51
  */
 public class Scheduller {
+
+    private static final String TAG = "Scheduller";
+
     // Share identity values across all connections to avoid collisions
     private static AtomicInteger messagesIds = new AtomicInteger(1);
     private static HashMap<Long, Long> idGenerationTime = new HashMap<Long, Long>();
@@ -346,8 +350,8 @@ public class Scheduller {
             }
         }
 
-        Logger.d("Scheduller", "Iteration: count: " + packages.size() + ", confirm:" + confirmedMessages.size());
-
+        Logger.d(TAG, "Iteration: count: " + packages.size() + ", confirm:" + confirmedMessages.size());
+        Logger.d(TAG, "Building package");
         if (foundedPackages.size() == 0 && confirmedMessages.size() != 0) {
             Long[] msgIds;
             synchronized (confirmedMessages) {
@@ -355,6 +359,7 @@ public class Scheduller {
                 confirmedMessages.clear();
             }
             MTMsgsAck ack = new MTMsgsAck(msgIds);
+            Logger.d(TAG, "Single msg_ack");
             try {
                 return new PreparedPackage(generateSeqNoWeak(), generateMessageId(), ack.serialize(), useHighPriority);
             } catch (IOException e) {
@@ -370,6 +375,7 @@ public class Scheduller {
                 schedullerPackage.seqNo = generateSeqNo();
                 schedullerPackage.relatedMessageIds.add(schedullerPackage.messageId);
             }
+            Logger.d(TAG, "Single package: " + schedullerPackage.id + " (" + schedullerPackage.messageId + ", " + schedullerPackage.seqNo + ")");
             schedullerPackage.writtenToChannel = contextId;
             schedullerPackage.lastAttemptTime = getCurrentTime();
             return new PreparedPackage(schedullerPackage.seqNo, schedullerPackage.messageId, schedullerPackage.serialized, useHighPriority);
@@ -383,6 +389,7 @@ public class Scheduller {
                         confirmedMessages.clear();
                     }
                     MTMsgsAck ack = new MTMsgsAck(msgIds);
+                    Logger.d(TAG, "Adding msg_ack: " + msgIds.length);
                     container.getMessages().add(new MTMessage(generateMessageId(), generateSeqNoWeak(), ack.serialize()));
                     confirmedMessages.clear();
                 } catch (IOException e) {
@@ -397,6 +404,7 @@ public class Scheduller {
                     schedullerPackage.seqNo = generateSeqNo();
                     schedullerPackage.relatedMessageIds.add(schedullerPackage.messageId);
                 }
+                Logger.d(TAG, "Adding package: " + schedullerPackage.id + " (" + schedullerPackage.messageId + ", " + schedullerPackage.seqNo + ")");
                 schedullerPackage.writtenToChannel = contextId;
                 schedullerPackage.lastAttemptTime = getCurrentTime();
                 container.getMessages().add(new MTMessage(schedullerPackage.messageId, schedullerPackage.seqNo, schedullerPackage.serialized));
@@ -407,6 +415,8 @@ public class Scheduller {
             for (SchedullerPackage schedullerPackage : foundedPackages) {
                 schedullerPackage.relatedMessageIds.add(containerMessageId);
             }
+
+            Logger.d(TAG, "Sending Package (" + containerMessageId + ", " + containerSeq + ")");
 
             try {
                 return new PreparedPackage(containerSeq, containerMessageId, container.serialize(), useHighPriority);

@@ -9,6 +9,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.TreeSet;
 
 import static org.telegram.tl.StreamingUtils.*;
 
@@ -22,7 +24,12 @@ public class MTMessagesContainer extends TLObject {
 
     public static final int CLASS_ID = 0x73f1f8dc;
 
-    private TLVector<MTMessage> messages = new TLVector<MTMessage>();
+    private TreeSet<MTMessage> messages = new TreeSet<MTMessage>(new Comparator<MTMessage>() {
+        @Override
+        public int compare(MTMessage mtMessage, MTMessage mtMessage2) {
+            return (int) Math.signum(mtMessage.getMessageId() - mtMessage2.getMessageId());
+        }
+    });
 
     public MTMessagesContainer(MTMessage[] messages) {
         Collections.addAll(this.messages, messages);
@@ -32,7 +39,7 @@ public class MTMessagesContainer extends TLObject {
 
     }
 
-    public TLVector<MTMessage> getMessages() {
+    public TreeSet<MTMessage> getMessages() {
         return messages;
     }
 
