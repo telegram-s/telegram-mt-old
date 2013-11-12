@@ -39,6 +39,8 @@ public class TcpContext {
 
     private static final int READ_TIMEOUT = 1000;
 
+    private static final int READ_DIE_TIMEOUT = 15 * 1000; // 15 sec
+
     private final String ip;
     private final int port;
     private final boolean useChecksum;
@@ -55,9 +57,14 @@ public class TcpContext {
 
     private WriterThread writerThread;
 
+    private DieThread dieThread;
+
     private TcpContextCallback callback;
 
     private final int contextId;
+
+    private long lastReadEvent = System.nanoTime();
+    private long lastWriteEvent = System.nanoTime();
 
     public TcpContext(String ip, int port, boolean checksum, TcpContextCallback callback) throws IOException {
         this.contextId = contextLastId.incrementAndGet();
@@ -76,8 +83,10 @@ public class TcpContext {
         this.callback = callback;
         this.readerThread = new ReaderThread();
         this.writerThread = new WriterThread();
+        this.dieThread = new DieThread();
         this.readerThread.start();
         this.writerThread.start();
+        this.dieThread.start();
     }
 
     public int getContextId() {
@@ -131,6 +140,12 @@ public class TcpContext {
             } catch (Exception e) {
                 Logger.e(TAG, e);
             }
+
+            try {
+                dieThread.interrupt();
+            } catch (Exception e) {
+                Logger.e(TAG, e);
+            }
         }
     }
 
@@ -162,6 +177,12 @@ public class TcpContext {
             }
             try {
                 writerThread.interrupt();
+            } catch (Exception e) {
+                Logger.e(TAG, e);
+            }
+
+            try {
+                dieThread.interrupt();
             } catch (Exception e) {
                 Logger.e(TAG, e);
             }
@@ -353,6 +374,7 @@ public class TcpContext {
                         crc32.update(data);
                         writeInt((int) (crc32.getValue() & 0xFFFFFFFF), outputStream);
                         writeByteArray(outputStream.toByteArray(), stream);
+                        onWrite();
                         stream.flush();
                     } else {
                         OutputStream stream = socket.getOutputStream();
@@ -378,6 +400,7 @@ public class TcpContext {
                             }
                         }
                         writeByteArray(data, stream);
+                        onWrite();
                         stream.flush();
                     }
                     sentPackets++;
@@ -389,21 +412,49 @@ public class TcpContext {
         }
     }
 
+    private void onWrite() {
+        lastWriteEvent = System.nanoTime();
+        notifyDieThread();
+    }
+
+    private void onRead() {
+        lastReadEvent = System.nanoTime();
+        notifyDieThread();
+    }
+
+    private void notifyDieThread() {
+        synchronized (dieThread) {
+            dieThread.notifyAll();
+        }
+    }
+
     private class DieThread extends Thread {
         @Override
         public void run() {
             while (!isBroken) {
-
+                long delta = (lastWriteEvent - lastReadEvent) / (1000 * 1000);
+                if (READ_DIE_TIMEOUT - delta <= 0) {
+                    Logger.d(TAG, "Dies by timeout");
+                    breakContext();
+                } else {
+                    synchronized (this) {
+                        try {
+                            wait(READ_DIE_TIMEOUT - delta);
+                        } catch (InterruptedException e) {
+                            return;
+                        }
+                    }
+                }
             }
         }
     }
 
 
-    public static void writeByteArray(byte[] data, OutputStream stream) throws IOException {
+    private void writeByteArray(byte[] data, OutputStream stream) throws IOException {
         stream.write(data);
     }
 
-    public static byte[] intToBytes(int value) {
+    private byte[] intToBytes(int value) {
         return new byte[]{
                 (byte) (value & 0xFF),
                 (byte) ((value >> 8) & 0xFF),
@@ -411,27 +462,28 @@ public class TcpContext {
                 (byte) ((value >> 24) & 0xFF)};
     }
 
-    public static void writeInt(int value, OutputStream stream) throws IOException {
+    private void writeInt(int value, OutputStream stream) throws IOException {
         stream.write((byte) (value & 0xFF));
         stream.write((byte) ((value >> 8) & 0xFF));
         stream.write((byte) ((value >> 16) & 0xFF));
         stream.write((byte) ((value >> 24) & 0xFF));
     }
 
-    public static void writeByte(int v, OutputStream stream) throws IOException {
+    private void writeByte(int v, OutputStream stream) throws IOException {
         stream.write(v);
     }
 
-    public static void writeByte(byte v, OutputStream stream) throws IOException {
+    private void writeByte(byte v, OutputStream stream) throws IOException {
         stream.write(v);
     }
 
-    public static byte[] readBytes(int count, int timeout, InputStream stream) throws IOException {
+    private byte[] readBytes(int count, int timeout, InputStream stream) throws IOException {
         byte[] res = new byte[count];
         int offset = 0;
         long start = System.nanoTime();
         while (offset < res.length) {
             int readed = stream.read(res, offset, res.length - offset);
+            onRead();
             if (readed > 0) {
                 offset += readed;
             } else {
@@ -444,11 +496,12 @@ public class TcpContext {
         return res;
     }
 
-    public static byte[] readBytes(int count, InputStream stream) throws IOException {
+    private byte[] readBytes(int count, InputStream stream) throws IOException {
         byte[] res = new byte[count];
         int offset = 0;
         while (offset < res.length) {
             int readed = stream.read(res, offset, res.length - offset);
+            onRead();
             if (readed > 0) {
                 offset += readed;
             } else if (readed < 0) {
@@ -460,32 +513,39 @@ public class TcpContext {
         return res;
     }
 
-    public static int readInt(InputStream stream) throws IOException {
+    private int readInt(InputStream stream) throws IOException {
         int a = stream.read();
         if (a < 0) {
             throw new IOException();
         }
+        onRead();
+
         int b = stream.read();
         if (b < 0) {
             throw new IOException();
         }
+        onRead();
+
         int c = stream.read();
         if (c < 0) {
             throw new IOException();
         }
+        onRead();
+
         int d = stream.read();
         if (d < 0) {
             throw new IOException();
         }
+        onRead();
 
         return a + (b << 8) + (c << 16) + (d << 24);
     }
 
-    public static int readInt(byte[] src) {
+    private int readInt(byte[] src) {
         return readInt(src, 0);
     }
 
-    public static int readInt(byte[] src, int offset) {
+    private int readInt(byte[] src, int offset) {
         int a = src[offset + 0] & 0xFF;
         int b = src[offset + 1] & 0xFF;
         int c = src[offset + 2] & 0xFF;
@@ -494,15 +554,16 @@ public class TcpContext {
         return a + (b << 8) + (c << 16) + (d << 24);
     }
 
-    public static int readByte(InputStream stream) throws IOException {
+    private int readByte(InputStream stream) throws IOException {
         int res = stream.read();
         if (res < 0) {
             throw new IOException();
         }
+        onRead();
         return res;
     }
 
-    public static boolean arrayEq(byte[] a, byte[] b) {
+    private boolean arrayEq(byte[] a, byte[] b) {
         if (a.length != b.length) {
             return false;
         }
