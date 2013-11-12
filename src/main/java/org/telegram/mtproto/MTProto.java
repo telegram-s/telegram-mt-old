@@ -482,7 +482,7 @@ public class MTProto {
                 synchronized (scheduller) {
                     if (contexts.size() == 0) {
                         try {
-                            long delay = scheduller.getSchedullerDelay();
+                            long delay = scheduller.getSchedullerDelay(false);
                             Logger.d(TAG, "Scheduller delay: " + delay);
                             if (delay > 0) {
                                 scheduller.wait(delay);
@@ -509,7 +509,7 @@ public class MTProto {
                     PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId());
                     if (preparedPackage == null) {
                         try {
-                            long delay = scheduller.getSchedullerDelay();
+                            long delay = scheduller.getSchedullerDelay(true);
                             Logger.d(TAG, "Scheduller delay: " + delay);
                             if (delay > 0) {
                                 scheduller.wait(delay);

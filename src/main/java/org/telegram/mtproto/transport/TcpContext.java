@@ -60,8 +60,8 @@ public class TcpContext {
     private final int contextId;
 
     public TcpContext(String ip, int port, boolean checksum, TcpContextCallback callback) throws IOException {
-        this.TAG = "Transport#" + hashCode();
         this.contextId = contextLastId.incrementAndGet();
+        this.TAG = "Transport#" + contextId;
         this.ip = ip;
         this.port = port;
         this.useChecksum = checksum;

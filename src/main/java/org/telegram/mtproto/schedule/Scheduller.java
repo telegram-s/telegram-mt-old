@@ -103,7 +103,10 @@ public class Scheduller {
         return postMessageDelayed(object, isApi, timeout, 0, -1, highPrioroty);
     }
 
-    public long getSchedullerDelay() {
+    public long getSchedullerDelay(boolean hasConnections) {
+        if (!hasConnections) {
+            return SCHEDULLER_TIMEOUT;
+        }
         long minDelay = SCHEDULLER_TIMEOUT;
         long time = getCurrentTime();
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
