@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.Socket;
 
-import static org.telegram.mtproto.transport.TcpContext.readByte;
 import static org.telegram.tl.StreamingUtils.readBytes;
 import static org.telegram.tl.StreamingUtils.writeByte;
 import static org.telegram.tl.StreamingUtils.writeByteArray;
@@ -73,5 +72,13 @@ public class PlainTcpConnection {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    private int readByte(InputStream stream) throws IOException {
+        int res = stream.read();
+        if (res < 0) {
+            throw new IOException();
+        }
+        return res;
     }
 }
