@@ -504,7 +504,7 @@ public class MTProto {
                     }
                 }
 
-                Logger.d(TAG, "Getting packages");
+                Logger.d(TAG, "doSchedule");
                 synchronized (scheduller) {
                     PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId());
                     if (preparedPackage == null) {
@@ -520,6 +520,7 @@ public class MTProto {
                         continue;
                     }
 
+                    Logger.d(TAG, "Sending to channel: " + context.getContextId());
                     try {
                         EncryptedMessage msg = encrypt(preparedPackage.getSeqNo(), preparedPackage.getMessageId(), preparedPackage.getContent());
                         if (preparedPackage.isHighPriority()) {
