@@ -154,6 +154,13 @@ public class Scheduller {
         lastMessageId = 0;
         seqNo = 0;
         currentMessageGeneration.clear();
+        for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
+            schedullerPackage.idGenerationTime = 0;
+            schedullerPackage.messageId = 0;
+            schedullerPackage.seqNo = 0;
+            schedullerPackage.relatedMessageIds.clear();
+            schedullerPackage.relatedFastConfirm.clear();
+        }
     }
 
     public boolean isMessageFromCurrentGeneration(long msgId) {

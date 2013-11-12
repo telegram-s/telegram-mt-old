@@ -9,7 +9,7 @@ project.group = "org.telegram"
 apply plugin: 'java'
 
 dependencies {
-    compile "org.telegram:tl-core:1.0.9+"
+    compile "org.telegram:tl-core:1.0.+"
 }
 
 def basicVersion = '1.0'
