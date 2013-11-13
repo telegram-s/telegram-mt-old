@@ -63,4 +63,9 @@ public class MTNewSessionCreated extends TLObject {
         uniqId = readBytes(8, stream);
         serverSalt = readBytes(8, stream);
     }
+
+    @Override
+    public String toString() {
+        return "new_session_created#9ec20908";
+    }
 }

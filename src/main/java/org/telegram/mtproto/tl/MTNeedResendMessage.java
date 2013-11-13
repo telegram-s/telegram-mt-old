@@ -62,4 +62,9 @@ public class MTNeedResendMessage extends TLObject {
     public void deserializeBody(InputStream stream, TLContext context) throws IOException {
         messages = readTLLongVector(stream, context);
     }
+
+    @Override
+    public String toString() {
+        return "msg_resend_req#7d861a08";
+    }
 }

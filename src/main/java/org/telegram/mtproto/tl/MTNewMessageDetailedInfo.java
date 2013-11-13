@@ -63,4 +63,9 @@ public class MTNewMessageDetailedInfo extends TLObject {
         bytes = readInt(stream);
         status = readInt(stream);
     }
+
+    @Override
+    public String toString() {
+        return "msg_new_detailed_info#809db6df";
+    }
 }

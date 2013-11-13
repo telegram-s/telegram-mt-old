@@ -71,4 +71,9 @@ public class MTRpcError extends TLObject {
         errorCode = readInt(stream);
         message = readTLString(stream);
     }
+
+    @Override
+    public String toString() {
+        return "rpc_error#2144ca19";
+    }
 }

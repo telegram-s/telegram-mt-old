@@ -44,4 +44,9 @@ public class MTGetFutureSalts extends TLObject {
     public void deserializeBody(InputStream stream, TLContext context) throws IOException {
         num = readInt(stream);
     }
+
+    @Override
+    public String toString() {
+        return "get_future_salts#b921bd04";
+    }
 }

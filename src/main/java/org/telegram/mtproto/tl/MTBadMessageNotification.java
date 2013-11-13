@@ -47,4 +47,9 @@ public class MTBadMessageNotification extends MTBadMessage {
         badMsqSeqno = readInt(stream);
         errorCode = readInt(stream);
     }
+
+    @Override
+    public String toString() {
+        return "bad_msg_notification#a7eff811";
+    }
 }

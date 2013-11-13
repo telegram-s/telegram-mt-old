@@ -55,4 +55,9 @@ public class MTRpcResult extends TLObject {
         messageId = readLong(stream);
         content = readBytes(stream.available(), stream);
     }
+
+    @Override
+    public String toString() {
+        return "rpc_result#f35c6d01";
+    }
 }

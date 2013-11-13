@@ -62,4 +62,9 @@ public class ServerDhOk extends ServerDhParams {
         serverNonce = readBytes(16, stream);
         encryptedAnswer = readTLBytes(stream);
     }
+
+    @Override
+    public String toString() {
+        return "server_DH_params_ok#d0e8075c";
+    }
 }

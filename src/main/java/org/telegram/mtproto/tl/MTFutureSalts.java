@@ -72,4 +72,9 @@ public class MTFutureSalts extends TLObject {
             salts.add(salt);
         }
     }
+
+    @Override
+    public String toString() {
+        return "future_salts#ae500895";
+    }
 }

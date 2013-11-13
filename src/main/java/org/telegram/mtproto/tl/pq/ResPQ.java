@@ -87,4 +87,9 @@ public class ResPQ extends TLObject {
         pq = readTLBytes(stream);
         fingerprints = readTLLongVector(stream, context);
     }
+
+    @Override
+    public String toString() {
+        return "resPQ#05162463";
+    }
 }

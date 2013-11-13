@@ -42,4 +42,9 @@ public class MTPing extends TLObject {
     public void deserializeBody(InputStream stream, TLContext context) throws IOException {
         pingId = readLong(stream);
     }
+
+    @Override
+    public String toString() {
+        return "ping#7abe77ec";
+    }
 }

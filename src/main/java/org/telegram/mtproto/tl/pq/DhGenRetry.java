@@ -20,4 +20,9 @@ public class DhGenRetry extends DhGenResult {
     public int getClassId() {
         return CLASS_ID;
     }
+
+    @Override
+    public String toString() {
+        return "dh_gen_retry#46dc1fb9";
+    }
 }

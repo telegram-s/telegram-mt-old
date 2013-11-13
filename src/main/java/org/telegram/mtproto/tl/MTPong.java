@@ -54,4 +54,9 @@ public class MTPong extends TLObject {
         messageId = readLong(stream);
         pingId = readLong(stream);
     }
+
+    @Override
+    public String toString() {
+        return "pong#347773c5";
+    }
 }

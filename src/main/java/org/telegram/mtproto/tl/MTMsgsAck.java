@@ -61,4 +61,9 @@ public class MTMsgsAck extends TLObject {
     public void deserializeBody(InputStream stream, TLContext context) throws IOException {
         messages = readTLLongVector(stream, context);
     }
+
+    @Override
+    public String toString() {
+        return "msgs_ack#62d6b459";
+    }
 }

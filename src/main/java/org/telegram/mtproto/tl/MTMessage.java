@@ -74,4 +74,9 @@ public class MTMessage extends TLObject {
         int size = readInt(stream);
         content = readBytes(size, stream);
     }
+
+    @Override
+    public String toString() {
+        return "message";
+    }
 }

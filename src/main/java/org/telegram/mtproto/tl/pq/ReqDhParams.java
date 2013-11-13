@@ -103,4 +103,9 @@ public class ReqDhParams extends TLMethod<ServerDhParams> {
         fingerPrint = readLong(stream);
         encryptedData = readTLBytes(stream);
     }
+
+    @Override
+    public String toString() {
+        return "req_DH_params#d712e4be";
+    }
 }

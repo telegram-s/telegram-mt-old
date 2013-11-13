@@ -28,4 +28,9 @@ public class DhGenOk extends DhGenResult {
     public int getClassId() {
         return CLASS_ID;
     }
+
+    @Override
+    public String toString() {
+        return "dh_gen_ok#3bcbf734";
+    }
 }

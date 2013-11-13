@@ -72,4 +72,9 @@ public class ReqPQ extends TLMethod<ResPQ> {
     public void deserializeBody(InputStream stream, TLContext context) throws IOException {
         nonce = readBytes(16, stream);
     }
+
+    @Override
+    public String toString() {
+        return "req_pq#60469778";
+    }
 }

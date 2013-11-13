@@ -77,4 +77,9 @@ public class ReqSetDhClientParams extends TLMethod<DhGenResult> {
         serverNonce = readBytes(16, stream);
         encrypted = readTLBytes(stream);
     }
+
+    @Override
+    public String toString() {
+        return "set_client_DH_params#f5045f1f";
+    }
 }

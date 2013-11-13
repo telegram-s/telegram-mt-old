@@ -74,4 +74,9 @@ public class ServerDhFailure extends ServerDhParams {
         serverNonce = readBytes(16, stream);
         newNonceHash = readBytes(16, stream);
     }
+
+    @Override
+    public String toString() {
+        return "server_DH_params_fail#79cb045d";
+    }
 }

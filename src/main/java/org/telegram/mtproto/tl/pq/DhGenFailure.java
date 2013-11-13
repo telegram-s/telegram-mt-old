@@ -20,4 +20,9 @@ public class DhGenFailure extends DhGenResult {
     public int getClassId() {
         return CLASS_ID;
     }
+
+    @Override
+    public String toString() {
+        return "dh_gen_fail#a69dae02";
+    }
 }

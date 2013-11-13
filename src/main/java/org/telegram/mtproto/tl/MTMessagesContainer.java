@@ -66,4 +66,9 @@ public class MTMessagesContainer extends TLObject {
             messages.add(message);
         }
     }
+
+    @Override
+    public String toString() {
+        return "msg_container#73f1f8dc";
+    }
 }

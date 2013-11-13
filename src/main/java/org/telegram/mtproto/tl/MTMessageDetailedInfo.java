@@ -70,4 +70,9 @@ public class MTMessageDetailedInfo extends TLObject {
         bytes = readInt(stream);
         state = readInt(stream);
     }
+
+    @Override
+    public String toString() {
+        return "msg_detailed_info#276d3ec6";
+    }
 }

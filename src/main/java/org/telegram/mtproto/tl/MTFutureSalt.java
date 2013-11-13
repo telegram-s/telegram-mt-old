@@ -63,4 +63,9 @@ public class MTFutureSalt extends TLObject {
         validUntil = readInt(stream);
         salt = readLong(stream);
     }
+
+    @Override
+    public String toString() {
+        return "future_salt#0949d9dc";
+    }
 }

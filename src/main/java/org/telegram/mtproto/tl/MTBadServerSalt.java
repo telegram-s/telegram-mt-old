@@ -56,4 +56,9 @@ public class MTBadServerSalt extends MTBadMessage {
         errorCode = readInt(stream);
         newSalt = readLong(stream);
     }
+
+    @Override
+    public String toString() {
+        return "bad_server_salt#edab447b";
+    }
 }
