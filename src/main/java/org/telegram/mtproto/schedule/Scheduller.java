@@ -431,7 +431,7 @@ public class Scheduller {
     public void onConnectionDies(int connectionId) {
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             if (schedullerPackage.queuedToChannel != -1 && schedullerPackage.queuedToChannel == connectionId) {
-                // messages.remove(schedullerPackage);
+                messages.remove(schedullerPackage.id);
             } else {
                 if (schedullerPackage.state == STATE_SENT && schedullerPackage.writtenToChannel == connectionId) {
                     schedullerPackage.state = STATE_QUEUED;
