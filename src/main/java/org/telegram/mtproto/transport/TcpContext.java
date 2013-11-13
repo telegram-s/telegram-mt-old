@@ -1,5 +1,6 @@
 package org.telegram.mtproto.transport;
 
+import org.telegram.mtproto.MTProto;
 import org.telegram.mtproto.log.Logger;
 
 import java.io.ByteArrayOutputStream;
@@ -66,9 +67,9 @@ public class TcpContext {
     private long lastReadEvent = System.nanoTime();
     private long lastWriteEvent = System.nanoTime();
 
-    public TcpContext(String ip, int port, boolean checksum, TcpContextCallback callback) throws IOException {
+    public TcpContext(MTProto proto, String ip, int port, boolean checksum, TcpContextCallback callback) throws IOException {
         this.contextId = contextLastId.incrementAndGet();
-        this.TAG = "Transport#" + contextId;
+        this.TAG = "MTProto#" + proto.getInstanceIndex() + "#Transport" + contextId;
         this.ip = ip;
         this.port = port;
         this.useChecksum = checksum;

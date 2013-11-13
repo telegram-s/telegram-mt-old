@@ -3,6 +3,7 @@ package org.telegram.mtproto.schedule;
 import com.sun.jndi.url.iiop.iiopURLContext;
 import org.omg.PortableServer.ServantRetentionPolicy;
 import org.telegram.mtproto.CallWrapper;
+import org.telegram.mtproto.MTProto;
 import org.telegram.mtproto.log.Logger;
 import org.telegram.mtproto.time.TimeOverlord;
 import org.telegram.mtproto.tl.MTMessage;
@@ -23,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class Scheduller {
 
-    private static final String TAG = "Scheduller";
+    private final String TAG;//  = "MTProtoScheduller";
 
     // Share identity values across all connections to avoid collisions
     private static AtomicInteger messagesIds = new AtomicInteger(1);
@@ -47,7 +48,8 @@ public class Scheduller {
 
     private CallWrapper wrapper;
 
-    public Scheduller(CallWrapper wrapper) {
+    public Scheduller(MTProto mtProto, CallWrapper wrapper) {
+        TAG = "MTProto#" + mtProto.getInstanceIndex() + "#Scheduller";
         this.wrapper = wrapper;
     }
 

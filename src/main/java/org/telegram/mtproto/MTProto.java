@@ -106,11 +106,15 @@ public class MTProto {
         this.tcpListener = new TcpListener();
         this.connectionFixerThread = new ConnectionFixerThread();
         this.connectionFixerThread.start();
-        this.scheduller = new Scheduller(callWrapper);
+        this.scheduller = new Scheduller(this, callWrapper);
         this.schedullerThread = new SchedullerThread();
         this.schedullerThread.start();
         this.responseProcessor = new ResponseProcessor();
         this.responseProcessor.start();
+    }
+
+    public int getInstanceIndex() {
+        return INSTANCE_INDEX;
     }
 
     @Override
@@ -588,7 +592,7 @@ public class MTProto {
 
                 try {
                     ConnectionInfo info = state.fetchConnectionInfo();
-                    TcpContext context = new TcpContext(info.getAddress(), info.getPort(), false, tcpListener);
+                    TcpContext context = new TcpContext(MTProto.this, info.getAddress(), info.getPort(), false, tcpListener);
                     if (isClosed) {
                         return;
                     }
