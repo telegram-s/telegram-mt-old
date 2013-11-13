@@ -26,6 +26,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.telegram.mtproto.secure.CryptoUtils.*;
+import static org.telegram.mtproto.util.TimeUtil.getUnixTime;
 import static org.telegram.tl.StreamingUtils.*;
 
 /**
@@ -231,6 +232,8 @@ public class MTProto {
     }
 
     private void onMTProtoMessage(long msgId, TLObject object) {
+        Logger.d(TAG, "MTProtoMessage: " + object.toString());
+
         if (object instanceof MTBadMessage) {
             MTBadMessage badMessage = (MTBadMessage) object;
             Logger.d(TAG, "BadMessage: " + badMessage.getErrorCode());
@@ -240,8 +243,6 @@ public class MTProto {
                 if (badMessage.getErrorCode() == ERROR_MSG_ID_TOO_BIG
                         || badMessage.getErrorCode() == ERROR_MSG_ID_TOO_SMALL) {
                     long delta = System.nanoTime() / 1000000 - time;
-                    System.out.println("Package time: " + new Date((badMessage.getBadMsgId() >> 32) * 1000).toString());
-                    System.out.println("New time: " + new Date((msgId >> 32) * 1000).toString());
                     TimeOverlord.getInstance().onForcedServerTimeArrived((msgId >> 32) * 1000, delta);
                     if (badMessage.getErrorCode() == ERROR_MSG_ID_TOO_BIG) {
                         scheduller.resetMessageId();
@@ -377,8 +378,6 @@ public class MTProto {
                 scheduller.postMessage(new MTNeedResendMessage(new long[]{detailedInfo.getAnswerMsgId()}), false, RESEND_TIMEOUT);
             }
         }
-
-        Logger.d(TAG, "Arrived: " + object.toString());
     }
 
     public void requestSchedule() {
@@ -487,7 +486,6 @@ public class MTProto {
                     if (contexts.size() == 0) {
                         try {
                             long delay = scheduller.getSchedullerDelay(false);
-                            Logger.d(TAG, "Scheduller delay: " + delay);
                             if (delay > 0) {
                                 scheduller.wait(delay);
                             }
@@ -514,7 +512,6 @@ public class MTProto {
                     if (preparedPackage == null) {
                         try {
                             long delay = scheduller.getSchedullerDelay(true);
-                            Logger.d(TAG, "Scheduller delay: " + delay);
                             if (delay > 0) {
                                 scheduller.wait(delay);
                             }
@@ -524,7 +521,9 @@ public class MTProto {
                         continue;
                     }
 
-                    Logger.d(TAG, "Sending to channel: " + context.getContextId());
+                    Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): time:" + getUnixTime(preparedPackage.getMessageId()));
+                    Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): seqNo:" + preparedPackage.getSeqNo() + ", msgId" + preparedPackage.getMessageId());
+
                     try {
                         EncryptedMessage msg = encrypt(preparedPackage.getSeqNo(), preparedPackage.getMessageId(), preparedPackage.getContent());
                         if (preparedPackage.isHighPriority()) {
@@ -535,7 +534,6 @@ public class MTProto {
                         } else {
                             scheduller.onConnectionDies(context.getContextId());
                         }
-                        Logger.d(TAG, "Sent: " + Integer.toHexString(msg.fastConfirm));
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
@@ -624,15 +622,19 @@ public class MTProto {
             }
             try {
                 MTMessage decrypted = decrypt(data);
+
+                Logger.d(TAG, "MessageArrived (#" + context.getContextId() + "): time: " + getUnixTime(decrypted.getMessageId()));
+                Logger.d(TAG, "MessageArrived (#" + context.getContextId() + "): seqNo: " + decrypted.getSeqNo() + ", msgId:" + decrypted.getMessageId());
+
                 if (readInt(decrypted.getContent()) == MTMessagesContainer.CLASS_ID) {
                     try {
                         TLObject object = protoContext.deserializeMessage(new ByteArrayInputStream(decrypted.getContent()));
                         if (object instanceof MTMessagesContainer) {
                             for (MTMessage mtMessage : ((MTMessagesContainer) object).getMessages()) {
                                 inQueue.add(mtMessage);
-                                synchronized (inQueue) {
-                                    inQueue.notifyAll();
-                                }
+                            }
+                            synchronized (inQueue) {
+                                inQueue.notifyAll();
                             }
                         }
                     } catch (DeserializeException e) {
