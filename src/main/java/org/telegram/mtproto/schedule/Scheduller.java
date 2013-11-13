@@ -66,14 +66,21 @@ public class Scheduller {
         return messageId;
     }
 
-    public synchronized int generateSeqNoWeak() {
+    private synchronized int generateSeqNoWeak() {
         return seqNo * 2;
     }
 
-    public synchronized int generateSeqNo() {
+    private synchronized int generateSeqNo() {
         int res = seqNo * 2 + 1;
         seqNo++;
         return res;
+    }
+
+    private synchronized void generateParams(SchedullerPackage schedullerPackage) {
+        schedullerPackage.messageId = generateMessageId();
+        schedullerPackage.seqNo = generateSeqNo();
+        schedullerPackage.idGenerationTime = getCurrentTime();
+        schedullerPackage.relatedMessageIds.add(schedullerPackage.messageId);
     }
 
     private long getCurrentTime() {
@@ -372,10 +379,7 @@ public class Scheduller {
             SchedullerPackage schedullerPackage = foundedPackages.get(0);
             schedullerPackage.state = STATE_SENT;
             if (schedullerPackage.idGenerationTime == 0) {
-                schedullerPackage.idGenerationTime = getCurrentTime();
-                schedullerPackage.messageId = generateMessageId();
-                schedullerPackage.seqNo = generateSeqNo();
-                schedullerPackage.relatedMessageIds.add(schedullerPackage.messageId);
+                generateParams(schedullerPackage);
             }
             Logger.d(TAG, "Single package: " + schedullerPackage.id + " (" + schedullerPackage.messageId + ", " + schedullerPackage.seqNo + ")");
             schedullerPackage.writtenToChannel = contextId;
@@ -401,16 +405,14 @@ public class Scheduller {
             for (SchedullerPackage schedullerPackage : foundedPackages) {
                 schedullerPackage.state = STATE_SENT;
                 if (schedullerPackage.idGenerationTime == 0) {
-                    schedullerPackage.idGenerationTime = getCurrentTime();
-                    schedullerPackage.messageId = generateMessageId();
-                    schedullerPackage.seqNo = generateSeqNo();
-                    schedullerPackage.relatedMessageIds.add(schedullerPackage.messageId);
+                    generateParams(schedullerPackage);
                 }
                 Logger.d(TAG, "Adding package: " + schedullerPackage.id + " (" + schedullerPackage.messageId + ", " + schedullerPackage.seqNo + ")");
                 schedullerPackage.writtenToChannel = contextId;
                 schedullerPackage.lastAttemptTime = getCurrentTime();
                 container.getMessages().add(new MTMessage(schedullerPackage.messageId, schedullerPackage.seqNo, schedullerPackage.serialized));
             }
+
             long containerMessageId = generateMessageId();
             int containerSeq = generateSeqNoWeak();
 

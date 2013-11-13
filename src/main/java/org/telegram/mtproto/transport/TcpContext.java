@@ -40,7 +40,7 @@ public class TcpContext {
 
     private static final int READ_TIMEOUT = 1000;
 
-    private static final int READ_DIE_TIMEOUT = 15 * 1000; // 15 sec
+    private static final int READ_DIE_TIMEOUT = 5 * 1000; // 15 sec
 
     private final String ip;
     private final int port;
@@ -64,8 +64,7 @@ public class TcpContext {
 
     private final int contextId;
 
-    private long lastReadEvent = System.nanoTime();
-    private long lastWriteEvent = System.nanoTime();
+    private long lastWriteEvent = 0;
 
     public TcpContext(MTProto proto, String ip, int port, boolean checksum, TcpContextCallback callback) throws IOException {
         this.contextId = contextLastId.incrementAndGet();
@@ -419,7 +418,7 @@ public class TcpContext {
     }
 
     private void onRead() {
-        lastReadEvent = System.nanoTime();
+        lastWriteEvent = 0;
         notifyDieThread();
     }
 
@@ -433,19 +432,30 @@ public class TcpContext {
         @Override
         public void run() {
             while (!isBroken) {
-                long delta = (lastWriteEvent - lastReadEvent) / (1000 * 1000);
-                if (READ_DIE_TIMEOUT - delta <= 0) {
-                    Logger.d(TAG, "Dies by timeout");
-                    breakContext();
+                if (lastWriteEvent != 0) {
+                    long delta = (System.nanoTime() - lastWriteEvent) / (1000 * 1000);
+                    if (delta >= READ_DIE_TIMEOUT) {
+                        Logger.d(TAG, "Dies by timeout");
+                        breakContext();
+                    } else {
+                        synchronized (this) {
+                            try {
+                                wait(READ_DIE_TIMEOUT - delta);
+                            } catch (InterruptedException e) {
+                                return;
+                            }
+                        }
+                    }
                 } else {
                     synchronized (this) {
                         try {
-                            wait(READ_DIE_TIMEOUT - delta);
+                            wait(READ_DIE_TIMEOUT);
                         } catch (InterruptedException e) {
                             return;
                         }
                     }
                 }
+
             }
         }
     }

@@ -453,9 +453,9 @@ public class MTProto {
         int msg_len = StreamingUtils.readInt(bodyStream);
         byte[] message = readBytes(msg_len, bodyStream);
 
-        if (!arrayEq(session, this.session)) {
-            throw new TransportSecurityException();
-        }
+//        if (!arrayEq(session, this.session)) {
+//            throw new TransportSecurityException();
+//        }
 
         return new MTMessage(messageId, mes_seq, message);
     }
