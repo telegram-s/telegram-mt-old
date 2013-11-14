@@ -102,7 +102,7 @@ public class MTProto {
         this.authKey = state.getAuthKey();
         this.authKeyId = substring(SHA1(authKey), 12, 8);
         this.protoContext = new MTProtoContext();
-        this.desiredConnectionCount = 1;
+        this.desiredConnectionCount = 2;
         this.session = Entropy.generateSeed(8);
         this.tcpListener = new TcpListener();
         this.connectionFixerThread = new ConnectionFixerThread();
