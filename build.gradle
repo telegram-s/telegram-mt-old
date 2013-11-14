@@ -1,16 +1,9 @@
-repositories {
-    maven {
-        url "http://192.168.1.12:8080/archiva/repository/internal/"
-    }
-}
-
 project.group = "org.telegram"
 
 apply plugin: 'java'
 
 dependencies {
     compile project(':tl-core')
-    // compile "org.telegram:tl-core:1.0.+"
 }
 
 def basicVersion = '1.0'
@@ -22,11 +15,3 @@ if (project.hasProperty('buildIndex')) {
 }
 
 apply plugin: 'maven'
-
-uploadArchives {
-    repositories {
-        mavenDeployer {
-            repository(url: "http://192.168.1.12:8080/archiva/repository/internal/")
-        }
-    }
-}
