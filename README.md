@@ -13,6 +13,10 @@ Compilation
 2. Checkout [tl-core repo](https://github.com/ex3ndr/telegram-tl-core) to ````tl-core```` folder
 3. Execute ````gradle build```` from ````mtproto```` folder
 
+Binary usage
+-----------
+This project depends only on [tl-core library](https://github.com/ex3ndr/telegram-tl-core)
+
 More information
 ----------------
 #### MTProto documentation
