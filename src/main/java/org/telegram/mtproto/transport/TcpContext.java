@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,6 +38,8 @@ public class TcpContext {
     private final String TAG;
 
     private static final AtomicInteger contextLastId = new AtomicInteger(1);
+
+    private static final int CONNECTION_TIMEOUT = 5 * 1000;
 
     private static final int READ_TIMEOUT = 1000;
 
@@ -72,7 +75,8 @@ public class TcpContext {
         this.ip = ip;
         this.port = port;
         this.useChecksum = checksum;
-        this.socket = new Socket(ip, port);
+        this.socket = new Socket();
+        this.socket.connect(new InetSocketAddress(ip, port), CONNECTION_TIMEOUT);
         this.socket.setKeepAlive(true);
         this.socket.setTcpNoDelay(true);
         if (!useChecksum) {
@@ -268,6 +272,8 @@ public class TcpContext {
                         } else {
                             int length = readByte(stream);
 
+                            Logger.d(TAG, "Start reading message: pre");
+
                             if (length >> 7 != 0) {
                                 length = (length << 24) + (readByte(stream) << 16) + (readByte(stream) << 8) + (readByte(stream) << 0);
                                 Logger.d(TAG, "fast confirm: " + Integer.toHexString(length));
@@ -278,6 +284,8 @@ public class TcpContext {
                                     length = readByte(stream) + (readByte(stream) << 8) + (readByte(stream) << 16);
                                 }
                                 int len = length * 4;
+
+                                Logger.d(TAG, "Start reading message: " + len);
 
                                 if (length == 4) {
                                     int error = readInt(stream);
@@ -440,7 +448,7 @@ public class TcpContext {
                     } else {
                         synchronized (this) {
                             try {
-                                wait(READ_DIE_TIMEOUT - delta);
+                                wait(Math.max(READ_DIE_TIMEOUT - delta, 100));
                             } catch (InterruptedException e) {
                                 return;
                             }

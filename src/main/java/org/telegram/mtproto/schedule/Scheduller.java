@@ -81,6 +81,7 @@ public class Scheduller {
         schedullerPackage.seqNo = generateSeqNo();
         schedullerPackage.idGenerationTime = getCurrentTime();
         schedullerPackage.relatedMessageIds.add(schedullerPackage.messageId);
+        schedullerPackage.generatedMessageIds.add(schedullerPackage.messageId);
     }
 
     private long getCurrentTime() {
@@ -116,7 +117,7 @@ public class Scheduller {
         return postMessageDelayed(object, isApi, timeout, 0, -1, highPrioroty);
     }
 
-    public long getSchedullerDelay(boolean hasConnections) {
+    public synchronized long getSchedullerDelay(boolean hasConnections) {
         if (!hasConnections) {
             return SCHEDULLER_TIMEOUT;
         }
@@ -152,7 +153,7 @@ public class Scheduller {
 
     public int mapSchedullerId(long msgId) {
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
-            if (schedullerPackage.messageId == msgId) {
+            if (schedullerPackage.generatedMessageIds.contains(msgId)) {
                 return schedullerPackage.id;
             }
         }
@@ -268,11 +269,11 @@ public class Scheduller {
         }
     }
 
-    public void forgetMessage(int id) {
+    public synchronized void forgetMessage(int id) {
         messages.remove(id);
     }
 
-    private ArrayList<SchedullerPackage> actualPackages(int contextId) {
+    private synchronized ArrayList<SchedullerPackage> actualPackages(int contextId) {
         ArrayList<SchedullerPackage> foundedPackages = new ArrayList<SchedullerPackage>();
         long time = getCurrentTime();
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
@@ -289,9 +290,7 @@ public class Scheduller {
                     if (getCurrentTime() - schedullerPackage.lastAttemptTime >= RETRY_TIMEOUT) {
                         isPendingPackage = true;
                     }
-                }
-            } else if (schedullerPackage.state == STATE_SENT) {
-                if (getCurrentTime() > schedullerPackage.expiresTime) {
+                } else {
                     forgetMessage(schedullerPackage.id);
                 }
             }
@@ -317,7 +316,7 @@ public class Scheduller {
         return foundedPackages;
     }
 
-    public PreparedPackage doSchedule(int contextId) {
+    public synchronized PreparedPackage doSchedule(int contextId) {
         ArrayList<SchedullerPackage> foundedPackages = actualPackages(contextId);
 
         if (foundedPackages.size() == 0 &&
@@ -481,6 +480,7 @@ public class Scheduller {
         public int seqNo;
         public HashSet<Integer> relatedFastConfirm = new HashSet<Integer>();
         public HashSet<Long> relatedMessageIds = new HashSet<Long>();
+        public HashSet<Long> generatedMessageIds = new HashSet<Long>();
 
         public boolean isRpc;
     }

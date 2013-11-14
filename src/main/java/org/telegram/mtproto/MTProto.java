@@ -102,7 +102,7 @@ public class MTProto {
         this.authKey = state.getAuthKey();
         this.authKeyId = substring(SHA1(authKey), 12, 8);
         this.protoContext = new MTProtoContext();
-        this.desiredConnectionCount = 2;
+        this.desiredConnectionCount = 1;
         this.session = Entropy.generateSeed(8);
         this.tcpListener = new TcpListener();
         this.connectionFixerThread = new ConnectionFixerThread();
@@ -197,18 +197,21 @@ public class MTProto {
             scheduller.notifyAll();
         }
 
+        return id;
+    }
+
+    private void onMTMessage(MTMessage mtMessage) {
+
         if (futureSaltsRequestedTime - System.nanoTime() > FUTURE_TIMEOUT * 1000L) {
-            int count = state.maximumCachedSalts((int) (TimeOverlord.getInstance().getServerTime() / 1000));
+            Logger.d(TAG, "Salt check timeout");
+            int count = state.maximumCachedSalts(getUnixTime(mtMessage.getMessageId()));
             if (count < FUTURE_MINIMAL) {
+                Logger.d(TAG, "Too fiew actual salts: " + count + ", requesting news");
                 futureSaltsRequestId = scheduller.postMessage(new MTGetFutureSalts(FUTURE_REQUEST_COUNT), false, FUTURE_TIMEOUT);
                 futureSaltsRequestedTime = System.nanoTime();
             }
         }
 
-        return id;
-    }
-
-    private void onMTMessage(MTMessage mtMessage) {
         if (mtMessage.getSeqNo() % 2 == 1) {
             scheduller.confirmMessage(mtMessage.getMessageId());
         }
@@ -251,6 +254,7 @@ public class MTProto {
                     requestSchedule();
                 } else if (badMessage.getErrorCode() == ERROR_SEQ_NO_TOO_BIG || badMessage.getErrorCode() == ERROR_SEQ_NO_TOO_SMALL) {
                     if (scheduller.isMessageFromCurrentGeneration(badMessage.getBadMsgId())) {
+                        Logger.d(TAG, "Resetting session");
                         session = Entropy.generateSeed(8);
                         scheduller.resetSession();
                     }
@@ -658,6 +662,8 @@ public class MTProto {
                 return;
             }
 
+            Logger.d(TAG, "OnError (#" + context.getContextId() + "): " + errorCode);
+
             // Fully maintained at transport level: TcpContext dies
         }
 
@@ -666,12 +672,13 @@ public class MTProto {
             if (isClosed) {
                 return;
             }
-            scheduller.onConnectionDies(context.getContextId());
-            requestSchedule();
+            Logger.d(TAG, "onChannelBroken (#" + context.getContextId() + ")");
             synchronized (contexts) {
                 contexts.remove(context);
                 contexts.notifyAll();
             }
+            scheduller.onConnectionDies(context.getContextId());
+            requestSchedule();
         }
 
         @Override
