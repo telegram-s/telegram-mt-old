@@ -21,6 +21,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -68,6 +69,7 @@ public class MTProto {
 
     private int desiredConnectionCount;
     private final HashSet<TcpContext> contexts = new HashSet<TcpContext>();
+    private final HashSet<Integer> initedContext = new HashSet<Integer>();
     private TcpContextCallback tcpListener;
     private ConnectionFixerThread connectionFixerThread;
 
@@ -512,7 +514,7 @@ public class MTProto {
 
                 Logger.d(TAG, "doSchedule");
                 synchronized (scheduller) {
-                    PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId());
+                    PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId(), initedContext.contains(context.getContextId()));
                     if (preparedPackage == null) {
                         try {
                             long delay = scheduller.getSchedullerDelay(true);
@@ -535,6 +537,7 @@ public class MTProto {
                         }
                         if (!context.isClosed()) {
                             context.postMessage(msg.data, preparedPackage.isHighPriority());
+                            initedContext.add(context.getContextId());
                         } else {
                             scheduller.onConnectionDies(context.getContextId());
                         }

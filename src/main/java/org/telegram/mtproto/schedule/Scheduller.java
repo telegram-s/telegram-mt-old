@@ -37,6 +37,8 @@ public class Scheduller {
     private static final int MAX_WORKLOAD_SIZE = 1024;
     private static final long RETRY_TIMEOUT = 15 * 1000;
 
+    private static final int MAX_ACK_COUNT = 16;
+
     private SortedMap<Integer, SchedullerPackage> messages = Collections.synchronizedSortedMap(new TreeMap<Integer, SchedullerPackage>());
     private HashSet<Long> currentMessageGeneration = new HashSet<Long>();
     private HashSet<Long> confirmedMessages = new HashSet<Long>();
@@ -316,11 +318,11 @@ public class Scheduller {
         return foundedPackages;
     }
 
-    public synchronized PreparedPackage doSchedule(int contextId) {
+    public synchronized PreparedPackage doSchedule(int contextId, boolean isInited) {
         ArrayList<SchedullerPackage> foundedPackages = actualPackages(contextId);
 
         if (foundedPackages.size() == 0 &&
-                (confirmedMessages.size() == 0 || (System.nanoTime() - firstConfirmTime) < CONFIRM_TIMEOUT)) {
+                (confirmedMessages.size() <= MAX_ACK_COUNT || (System.nanoTime() - firstConfirmTime) < CONFIRM_TIMEOUT)) {
             return null;
         }
 
@@ -386,7 +388,7 @@ public class Scheduller {
             return new PreparedPackage(schedullerPackage.seqNo, schedullerPackage.messageId, schedullerPackage.serialized, useHighPriority);
         } else {
             MTMessagesContainer container = new MTMessagesContainer();
-            if (confirmedMessages.size() > 0 && !useHighPriority) {
+            if ((confirmedMessages.size() > 0 && !useHighPriority) || (!isInited)) {
                 try {
                     Long[] msgIds;
                     synchronized (confirmedMessages) {
