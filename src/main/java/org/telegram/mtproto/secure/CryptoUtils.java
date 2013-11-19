@@ -184,6 +184,26 @@ public class CryptoUtils {
         return null;
     }
 
+    public static String MD5(RandomAccessFile randomAccessFile) {
+        try {
+            MessageDigest crypt = MessageDigest.getInstance("MD5");
+            crypt.reset();
+            byte[] block = new byte[8 * 1024];
+            for (int i = 0; i < randomAccessFile.length(); i += 8 * 1024) {
+                int len = (int) Math.min(block.length, randomAccessFile.length() - i);
+                randomAccessFile.readFully(block, 0, len);
+                crypt.update(block, 0, len);
+            }
+            return ToHex(crypt.digest());
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
     public static byte[] MD5Raw(byte[] src) {
         try {
             MessageDigest crypt = MessageDigest.getInstance("MD5");
