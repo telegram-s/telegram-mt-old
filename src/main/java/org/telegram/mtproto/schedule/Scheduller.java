@@ -434,11 +434,14 @@ public class Scheduller {
     }
 
     public void onConnectionDies(int connectionId) {
+        Logger.d(TAG, "Connection dies " + connectionId);
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             if (schedullerPackage.queuedToChannel != -1 && schedullerPackage.queuedToChannel == connectionId) {
+                Logger.d(TAG, "Removing: " + schedullerPackage.id);
                 messages.remove(schedullerPackage.id);
             } else {
                 if (schedullerPackage.state == STATE_SENT && schedullerPackage.writtenToChannel == connectionId) {
+                    Logger.d(TAG, "Re-schedule: " + schedullerPackage.id);
                     schedullerPackage.state = STATE_QUEUED;
                     schedullerPackage.lastAttemptTime = 0;
                 }
