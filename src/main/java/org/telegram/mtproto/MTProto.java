@@ -203,7 +203,6 @@ public class MTProto {
     }
 
     private void onMTMessage(MTMessage mtMessage) {
-
         if (futureSaltsRequestedTime - System.nanoTime() > FUTURE_TIMEOUT * 1000L) {
             Logger.d(TAG, "Salt check timeout");
             int count = state.maximumCachedSalts(getUnixTime(mtMessage.getMessageId()));
@@ -243,7 +242,7 @@ public class MTProto {
             MTBadMessage badMessage = (MTBadMessage) object;
             Logger.d(TAG, "BadMessage: " + badMessage.getErrorCode());
             scheduller.onMessageConfirmed(badMessage.getBadMsgId());
-            long time = scheduller.getMessageIdGenerationTime(badMessage.getBadMsgId());
+            long time = scheduller.mapSchedullerId(badMessage.getBadMsgId());
             if (time != 0) {
                 if (badMessage.getErrorCode() == ERROR_MSG_ID_TOO_BIG
                         || badMessage.getErrorCode() == ERROR_MSG_ID_TOO_SMALL) {
@@ -277,6 +276,9 @@ public class MTProto {
                 } else if (badMessage.getErrorCode() == ERROR_TOO_OLD) {
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
                     requestSchedule();
+                } else {
+                    Logger.d(TAG, "Ignored BadMsg #" + badMessage.getErrorCode() + " (" + badMessage.getBadMsgId() + ", " + badMessage.getBadMsqSeqno() + ")");
+                    scheduller.forgetMessageByMsgId(badMessage.getBadMsgId());
                 }
             }
         } else if (object instanceof MTMsgsAck) {
@@ -321,6 +323,7 @@ public class MTProto {
                         }
 
                         callback.onRpcError(id, error.getErrorCode(), error.getMessage(), this);
+                        scheduller.forgetMessage(id);
                     } catch (IOException e) {
                         e.printStackTrace();
                         return;
@@ -328,6 +331,7 @@ public class MTProto {
                 } else {
                     Logger.d(TAG, "rpc_result: " + result.getMessageId() + " #" + Integer.toHexString(responseConstructor));
                     callback.onRpcResult(id, result.getContent(), this);
+                    scheduller.forgetMessage(id);
                 }
             } else {
                 Logger.d(TAG, "ignored rpc_result: " + result.getMessageId());
@@ -342,6 +346,7 @@ public class MTProto {
             MTPong pong = (MTPong) object;
             Logger.d(TAG, "pong: " + pong.getPingId());
             scheduller.onMessageConfirmed(pong.getMessageId());
+            scheduller.forgetMessageByMsgId(pong.getMessageId());
             long time = scheduller.getMessageIdGenerationTime(pong.getMessageId());
             if (time != 0) {
                 long delta = System.nanoTime() / 1000000 - time;
@@ -350,6 +355,7 @@ public class MTProto {
         } else if (object instanceof MTFutureSalts) {
             MTFutureSalts salts = (MTFutureSalts) object;
             scheduller.onMessageConfirmed(salts.getRequestId());
+            scheduller.forgetMessageByMsgId(salts.getRequestId());
 
             long time = scheduller.getMessageIdGenerationTime(salts.getRequestId());
 
@@ -369,11 +375,12 @@ public class MTProto {
             if (receivedMessages.contains(detailedInfo.getAnswerMsgId())) {
                 scheduller.confirmMessage(detailedInfo.getAnswerMsgId());
             } else {
-                long time = scheduller.getMessageIdGenerationTime(detailedInfo.getMsgId());
-                if (time > 0) {
+                int id = scheduller.mapSchedullerId(detailedInfo.getMsgId());
+                if (id > 0) {
                     scheduller.postMessage(new MTNeedResendMessage(new long[]{detailedInfo.getAnswerMsgId()}), false, RESEND_TIMEOUT);
                 } else {
                     scheduller.confirmMessage(detailedInfo.getAnswerMsgId());
+                    scheduller.forgetMessageByMsgId(detailedInfo.getMsgId());
                 }
             }
         } else if (object instanceof MTNewMessageDetailedInfo) {
@@ -383,6 +390,8 @@ public class MTProto {
             } else {
                 scheduller.postMessage(new MTNeedResendMessage(new long[]{detailedInfo.getAnswerMsgId()}), false, RESEND_TIMEOUT);
             }
+        } else {
+            Logger.d(TAG, "Ignored MTProto message " + object.toString());
         }
     }
 

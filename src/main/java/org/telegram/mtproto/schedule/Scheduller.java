@@ -104,9 +104,11 @@ public class Scheduller {
         schedullerPackage.addTime = getCurrentTime();
         schedullerPackage.scheduleTime = schedullerPackage.addTime + delay;
         schedullerPackage.expiresTime = schedullerPackage.scheduleTime + timeout;
+        schedullerPackage.ttlTime = schedullerPackage.scheduleTime + timeout * 2;
         schedullerPackage.isRpc = isRpc;
         schedullerPackage.queuedToChannel = contextId;
         schedullerPackage.priority = highPrioroty ? PRIORITY_HIGH : PRIORITY_NORMAL;
+        schedullerPackage.supportTag = object.toString();
         messages.put(id, schedullerPackage);
         return id;
     }
@@ -174,8 +176,6 @@ public class Scheduller {
             schedullerPackage.idGenerationTime = 0;
             schedullerPackage.messageId = 0;
             schedullerPackage.seqNo = 0;
-            schedullerPackage.relatedMessageIds.clear();
-            schedullerPackage.relatedFastConfirm.clear();
         }
     }
 
@@ -193,7 +193,6 @@ public class Scheduller {
                 schedullerPackage.idGenerationTime = 0;
                 schedullerPackage.messageId = 0;
                 schedullerPackage.seqNo = 0;
-                schedullerPackage.relatedMessageIds.clear();
                 schedullerPackage.state = STATE_QUEUED;
                 schedullerPackage.scheduleTime = getCurrentTime() + delay;
             }
@@ -271,7 +270,15 @@ public class Scheduller {
         }
     }
 
+    public synchronized void forgetMessageByMsgId(long msgId) {
+        int scId = mapSchedullerId(msgId);
+        if (scId > 0) {
+            forgetMessage(scId);
+        }
+    }
+
     public synchronized void forgetMessage(int id) {
+        Logger.d(TAG, "Forgetting message: #" + id);
         messages.remove(id);
     }
 
@@ -283,6 +290,12 @@ public class Scheduller {
                 continue;
             }
             boolean isPendingPackage = false;
+
+            if (schedullerPackage.ttlTime <= getCurrentTime()) {
+                forgetMessage(schedullerPackage.id);
+                continue;
+            }
+
             if (schedullerPackage.state == STATE_QUEUED) {
                 if (schedullerPackage.scheduleTime <= time) {
                     isPendingPackage = true;
@@ -292,8 +305,6 @@ public class Scheduller {
                     if (getCurrentTime() - schedullerPackage.lastAttemptTime >= RETRY_TIMEOUT) {
                         isPendingPackage = true;
                     }
-                } else {
-                    forgetMessage(schedullerPackage.id);
                 }
             }
 
@@ -307,7 +318,7 @@ public class Scheduller {
                         }
                     } catch (IOException e) {
                         e.printStackTrace();
-                        messages.remove(schedullerPackage);
+                        forgetMessage(schedullerPackage.id);
                         continue;
                     }
                 }
@@ -382,7 +393,7 @@ public class Scheduller {
             if (schedullerPackage.idGenerationTime == 0) {
                 generateParams(schedullerPackage);
             }
-            Logger.d(TAG, "Single package: " + schedullerPackage.id + " (" + schedullerPackage.messageId + ", " + schedullerPackage.seqNo + ")");
+            Logger.d(TAG, "Single package: #" + schedullerPackage.id + " " + schedullerPackage.supportTag + " (" + schedullerPackage.messageId + ", " + schedullerPackage.seqNo + ")");
             schedullerPackage.writtenToChannel = contextId;
             schedullerPackage.lastAttemptTime = getCurrentTime();
             return new PreparedPackage(schedullerPackage.seqNo, schedullerPackage.messageId, schedullerPackage.serialized, useHighPriority);
@@ -408,7 +419,7 @@ public class Scheduller {
                 if (schedullerPackage.idGenerationTime == 0) {
                     generateParams(schedullerPackage);
                 }
-                Logger.d(TAG, "Adding package: " + schedullerPackage.id + " (" + schedullerPackage.messageId + ", " + schedullerPackage.seqNo + ")");
+                Logger.d(TAG, "Adding package: #" + schedullerPackage.id + " " + schedullerPackage.supportTag + " (" + schedullerPackage.messageId + ", " + schedullerPackage.seqNo + ")");
                 schedullerPackage.writtenToChannel = contextId;
                 schedullerPackage.lastAttemptTime = getCurrentTime();
                 container.getMessages().add(new MTMessage(schedullerPackage.messageId, schedullerPackage.seqNo, schedullerPackage.serialized));
@@ -437,11 +448,11 @@ public class Scheduller {
         Logger.d(TAG, "Connection dies " + connectionId);
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             if (schedullerPackage.queuedToChannel != -1 && schedullerPackage.queuedToChannel == connectionId) {
-                Logger.d(TAG, "Removing: " + schedullerPackage.id);
-                messages.remove(schedullerPackage.id);
+                Logger.d(TAG, "Removing: #" + schedullerPackage.id + " " + schedullerPackage.supportTag);
+                forgetMessage(schedullerPackage.id);
             } else {
                 if (schedullerPackage.state == STATE_SENT && schedullerPackage.writtenToChannel == connectionId) {
-                    Logger.d(TAG, "Re-schedule: " + schedullerPackage.id);
+                    Logger.d(TAG, "Re-schedule: #" + schedullerPackage.id + " " + schedullerPackage.supportTag);
                     schedullerPackage.state = STATE_QUEUED;
                     schedullerPackage.lastAttemptTime = 0;
                 }
@@ -462,6 +473,8 @@ public class Scheduller {
             this.id = id;
         }
 
+        public String supportTag;
+
         public int id;
 
         public TLObject object;
@@ -470,6 +483,7 @@ public class Scheduller {
         public long addTime;
         public long scheduleTime;
         public long expiresTime;
+        public long ttlTime;
         public long lastAttemptTime;
 
         public int writtenToChannel = -1;
