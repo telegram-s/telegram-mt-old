@@ -107,13 +107,13 @@ public class MTProto {
         this.desiredConnectionCount = 2;
         this.session = Entropy.generateSeed(8);
         this.tcpListener = new TcpListener();
-        this.connectionFixerThread = new ConnectionFixerThread();
-        this.connectionFixerThread.start();
         this.scheduller = new Scheduller(this, callWrapper);
         this.schedullerThread = new SchedullerThread();
         this.schedullerThread.start();
         this.responseProcessor = new ResponseProcessor();
         this.responseProcessor.start();
+        this.connectionFixerThread = new ConnectionFixerThread();
+        this.connectionFixerThread.start();
     }
 
     public int getInstanceIndex() {
