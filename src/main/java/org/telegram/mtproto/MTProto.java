@@ -240,7 +240,7 @@ public class MTProto {
 
         if (object instanceof MTBadMessage) {
             MTBadMessage badMessage = (MTBadMessage) object;
-            Logger.d(TAG, "BadMessage: " + badMessage.getErrorCode());
+            Logger.d(TAG, "BadMessage: " + badMessage.getErrorCode() + " #" + badMessage.getBadMsgId());
             scheduller.onMessageConfirmed(badMessage.getBadMsgId());
             long time = scheduller.mapSchedullerId(badMessage.getBadMsgId());
             if (time != 0) {
