@@ -35,6 +35,7 @@ public class Scheduller {
     private static final long CONFIRM_TIMEOUT = 60 * 1000;//60 sec
 
     private static final int MAX_WORKLOAD_SIZE = 1024;
+    private static final int BIG_MESSAGE_SIZE = 1024;
     private static final long RETRY_TIMEOUT = 15 * 1000;
 
     private static final int MAX_ACK_COUNT = 16;
@@ -302,8 +303,10 @@ public class Scheduller {
                 }
             } else if (schedullerPackage.state == STATE_SENT) {
                 if (getCurrentTime() <= schedullerPackage.expiresTime) {
-                    if (getCurrentTime() - schedullerPackage.lastAttemptTime >= RETRY_TIMEOUT) {
-                        isPendingPackage = true;
+                    if (schedullerPackage.serialized == null || schedullerPackage.serialized.length < BIG_MESSAGE_SIZE) {
+                        if (getCurrentTime() - schedullerPackage.lastAttemptTime >= RETRY_TIMEOUT) {
+                            isPendingPackage = true;
+                        }
                     }
                 }
             }
@@ -364,7 +367,9 @@ public class Scheduller {
             int totalSize = 0;
             for (SchedullerPackage p : foundedPackages) {
                 packages.add(p);
+                Logger.d("Scheduller", "Prepare package: " + p.supportTag + " of size " + p.serialized.length);
                 totalSize += p.serialized.length;
+                Logger.d("Scheduller", "Total size: " + totalSize);
                 if (totalSize > MAX_WORKLOAD_SIZE) {
                     break;
                 }
@@ -414,7 +419,7 @@ public class Scheduller {
                     e.printStackTrace();
                 }
             }
-            for (SchedullerPackage schedullerPackage : foundedPackages) {
+            for (SchedullerPackage schedullerPackage : packages) {
                 schedullerPackage.state = STATE_SENT;
                 if (schedullerPackage.idGenerationTime == 0) {
                     generateParams(schedullerPackage);
@@ -428,7 +433,7 @@ public class Scheduller {
             long containerMessageId = generateMessageId();
             int containerSeq = generateSeqNoWeak();
 
-            for (SchedullerPackage schedullerPackage : foundedPackages) {
+            for (SchedullerPackage schedullerPackage : packages) {
                 schedullerPackage.relatedMessageIds.add(containerMessageId);
             }
 
