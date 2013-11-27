@@ -20,8 +20,8 @@ public class TransportRate {
     private Random rnd = new Random();
 
     public TransportRate(ConnectionInfo connectionInfo) {
-        transports.put(0, new Transport(new ConnectionType(0, connectionInfo.getAddress(), 80, ConnectionType.TYPE_TCP), 10.0f));
-        transports.put(1, new Transport(new ConnectionType(1, connectionInfo.getAddress(), 443, ConnectionType.TYPE_TCP), 1.0f));
+        transports.put(0, new Transport(new ConnectionType(0, connectionInfo.getAddress(), 80, ConnectionType.TYPE_TCP), 1.0f));
+        transports.put(1, new Transport(new ConnectionType(1, connectionInfo.getAddress(), 443, ConnectionType.TYPE_TCP), 2.0f));
         normalize();
     }
 
