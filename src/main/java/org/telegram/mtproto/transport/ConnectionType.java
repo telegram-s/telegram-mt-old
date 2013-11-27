@@ -6,14 +6,20 @@ package org.telegram.mtproto.transport;
 public class ConnectionType {
     public static final int TYPE_TCP = 0;
 
+    private int id;
     private String host;
     private int port;
     private int connectionType;
 
-    public ConnectionType(String host, int port, int connectionType) {
+    public ConnectionType(int id, String host, int port, int connectionType) {
+        this.id = id;
         this.host = host;
         this.port = port;
         this.connectionType = connectionType;
+    }
+
+    public int getId() {
+        return id;
     }
 
     public String getHost() {

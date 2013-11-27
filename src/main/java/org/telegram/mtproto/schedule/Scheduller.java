@@ -205,6 +205,7 @@ public class Scheduller {
             if (schedullerPackage.relatedMessageIds.contains(msgId)) {
                 schedullerPackage.relatedMessageIds.clear();
                 schedullerPackage.state = STATE_QUEUED;
+                schedullerPackage.lastAttemptTime = 0;
             }
         }
     }
@@ -452,15 +453,30 @@ public class Scheduller {
     public void onConnectionDies(int connectionId) {
         Logger.d(TAG, "Connection dies " + connectionId);
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
-            if (schedullerPackage.queuedToChannel != -1 && schedullerPackage.queuedToChannel == connectionId) {
+            if (schedullerPackage.writtenToChannel != connectionId) {
+                continue;
+            }
+
+            if (schedullerPackage.queuedToChannel != -1) {
                 Logger.d(TAG, "Removing: #" + schedullerPackage.id + " " + schedullerPackage.supportTag);
                 forgetMessage(schedullerPackage.id);
             } else {
-                if (schedullerPackage.state == STATE_SENT && schedullerPackage.writtenToChannel == connectionId) {
-                    Logger.d(TAG, "Re-schedule: #" + schedullerPackage.id + " " + schedullerPackage.supportTag);
-                    schedullerPackage.state = STATE_QUEUED;
-                    schedullerPackage.lastAttemptTime = 0;
+                if (schedullerPackage.isRpc) {
+                    if (schedullerPackage.state == STATE_CONFIRMED || schedullerPackage.state == STATE_QUEUED) {
+                        if (schedullerPackage.serialized == null || schedullerPackage.serialized.length < BIG_MESSAGE_SIZE) {
+                            Logger.d(TAG, "Re-schedule: #" + schedullerPackage.id + " " + schedullerPackage.supportTag);
+                            schedullerPackage.state = STATE_QUEUED;
+                            schedullerPackage.lastAttemptTime = 0;
+                        }
+                    }
+                } else {
+                    if (schedullerPackage.state == STATE_SENT) {
+                        Logger.d(TAG, "Re-schedule: #" + schedullerPackage.id + " " + schedullerPackage.supportTag);
+                        schedullerPackage.state = STATE_QUEUED;
+                        schedullerPackage.lastAttemptTime = 0;
+                    }
                 }
+
             }
         }
     }

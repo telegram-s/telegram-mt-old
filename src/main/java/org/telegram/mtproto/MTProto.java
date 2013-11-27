@@ -9,8 +9,10 @@ import org.telegram.mtproto.state.ConnectionInfo;
 import org.telegram.mtproto.state.KnownSalt;
 import org.telegram.mtproto.time.TimeOverlord;
 import org.telegram.mtproto.tl.*;
+import org.telegram.mtproto.transport.ConnectionType;
 import org.telegram.mtproto.transport.TcpContext;
 import org.telegram.mtproto.transport.TcpContextCallback;
+import org.telegram.mtproto.transport.TransportRate;
 import org.telegram.tl.DeserializeException;
 import org.telegram.tl.StreamingUtils;
 import org.telegram.tl.TLMethod;
@@ -69,6 +71,8 @@ public class MTProto {
 
     private int desiredConnectionCount;
     private final HashSet<TcpContext> contexts = new HashSet<TcpContext>();
+    private final HashMap<Integer, Integer> contextConnectionId = new HashMap<Integer, Integer>();
+    private final HashSet<Integer> connectedContexts = new HashSet<Integer>();
     private final HashSet<Integer> initedContext = new HashSet<Integer>();
     private TcpContextCallback tcpListener;
     private ConnectionFixerThread connectionFixerThread;
@@ -96,6 +100,8 @@ public class MTProto {
 
     private int roundRobin = 0;
 
+    private TransportRate connectionRate;
+
     public MTProto(AbsMTProtoState state, MTProtoCallback callback, CallWrapper callWrapper) {
         this.INSTANCE_INDEX = instanceIndex.incrementAndGet();
         this.TAG = "MTProto#" + INSTANCE_INDEX;
@@ -108,6 +114,7 @@ public class MTProto {
         this.session = Entropy.generateSeed(8);
         this.tcpListener = new TcpListener();
         this.scheduller = new Scheduller(this, callWrapper);
+        this.connectionRate = new TransportRate(state.fetchConnectionInfo());
         this.schedullerThread = new SchedullerThread();
         this.schedullerThread.start();
         this.responseProcessor = new ResponseProcessor();
@@ -283,15 +290,23 @@ public class MTProto {
             }
         } else if (object instanceof MTMsgsAck) {
             MTMsgsAck ack = (MTMsgsAck) object;
+            String log = "";
             for (Long ackMsgId : ack.getMessages()) {
                 scheduller.onMessageConfirmed(ackMsgId);
+                if (log.length() > 0) {
+                    log += ", ";
+                }
+                log += ackMsgId;
                 int id = scheduller.mapSchedullerId(ackMsgId);
                 if (id > 0) {
                     callback.onConfirmed(id);
                 }
             }
+            Logger.d(TAG, "msgs_ack: " + log);
         } else if (object instanceof MTRpcResult) {
             MTRpcResult result = (MTRpcResult) object;
+
+            Logger.d(TAG, "rpc_result: " + result.getMessageId());
 
             int id = scheduller.mapSchedullerId(result.getMessageId());
             if (id > 0) {
@@ -372,6 +387,7 @@ public class MTProto {
             }
         } else if (object instanceof MTMessageDetailedInfo) {
             MTMessageDetailedInfo detailedInfo = (MTMessageDetailedInfo) object;
+            Logger.d(TAG, "msg_detailed_info: " + detailedInfo.getMsgId() + ", answer: " + detailedInfo.getAnswerMsgId());
             if (receivedMessages.contains(detailedInfo.getAnswerMsgId())) {
                 scheduller.confirmMessage(detailedInfo.getAnswerMsgId());
             } else {
@@ -385,6 +401,7 @@ public class MTProto {
             }
         } else if (object instanceof MTNewMessageDetailedInfo) {
             MTNewMessageDetailedInfo detailedInfo = (MTNewMessageDetailedInfo) object;
+            Logger.d(TAG, "msg_new_detailed_info: " + detailedInfo.getAnswerMsgId());
             if (receivedMessages.contains(detailedInfo.getAnswerMsgId())) {
                 scheduller.confirmMessage(detailedInfo.getAnswerMsgId());
             } else {
@@ -604,21 +621,23 @@ public class MTProto {
                     }
                 }
 
+                ConnectionType type = connectionRate.tryConnection();
                 try {
-                    ConnectionInfo info = state.fetchConnectionInfo();
-                    TcpContext context = new TcpContext(MTProto.this, info.getAddress(), info.getPort(), false, tcpListener);
+                    TcpContext context = new TcpContext(MTProto.this, type.getHost(), type.getPort(), false, tcpListener);
                     if (isClosed) {
                         return;
                     }
                     scheduller.postMessageDelayed(new MTPing(Entropy.generateRandomId()), false, PING_TIMEOUT, 0, context.getContextId(), false);
                     synchronized (contexts) {
                         contexts.add(context);
+                        contextConnectionId.put(context.getContextId(), type.getId());
                     }
                     synchronized (scheduller) {
                         scheduller.notifyAll();
                     }
                 } catch (IOException e) {
                     e.printStackTrace();
+                    connectionRate.onConnectionFailure(type.getId());
                     try {
                         Thread.sleep(1000);
                     } catch (InterruptedException e1) {
@@ -638,6 +657,10 @@ public class MTProto {
             }
             try {
                 MTMessage decrypted = decrypt(data);
+                if (!connectedContexts.contains(context.getContextId())) {
+                    connectedContexts.add(context.getContextId());
+                    connectionRate.onConnectionSuccess(contextConnectionId.get(context.getContextId()));
+                }
 
                 Logger.d(TAG, "MessageArrived (#" + context.getContextId() + "): time: " + getUnixTime(decrypted.getMessageId()));
                 Logger.d(TAG, "MessageArrived (#" + context.getContextId() + "): seqNo: " + decrypted.getSeqNo() + ", msgId:" + decrypted.getMessageId());
@@ -665,6 +688,15 @@ public class MTProto {
                 }
             } catch (IOException e) {
                 Logger.e(TAG, e);
+                synchronized (contexts) {
+                    context.close();
+                    if (!connectedContexts.contains(context.getContextId())) {
+                        connectionRate.onConnectionFailure(contextConnectionId.get(context.getContextId()));
+                    }
+                    contexts.remove(context);
+                    contexts.notifyAll();
+                    scheduller.onConnectionDies(context.getContextId());
+                }
             }
         }
 
@@ -688,6 +720,9 @@ public class MTProto {
             synchronized (contexts) {
                 contexts.remove(context);
                 contexts.notifyAll();
+                if (!connectedContexts.contains(context.getContextId())) {
+                    connectionRate.onConnectionFailure(contextConnectionId.get(context.getContextId()));
+                }
             }
             scheduller.onConnectionDies(context.getContextId());
             requestSchedule();
