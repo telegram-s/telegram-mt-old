@@ -196,6 +196,7 @@ public class Scheduller {
                 schedullerPackage.seqNo = 0;
                 schedullerPackage.state = STATE_QUEUED;
                 schedullerPackage.scheduleTime = getCurrentTime() + delay;
+                Logger.d(TAG, "Resending as new #" + schedullerPackage.id);
             }
         }
     }
@@ -203,7 +204,7 @@ public class Scheduller {
     public void resendMessage(long msgId) {
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             if (schedullerPackage.relatedMessageIds.contains(msgId)) {
-                schedullerPackage.relatedMessageIds.clear();
+                // schedullerPackage.relatedMessageIds.clear();
                 schedullerPackage.state = STATE_QUEUED;
                 schedullerPackage.lastAttemptTime = 0;
             }

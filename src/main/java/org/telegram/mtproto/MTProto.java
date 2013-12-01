@@ -249,7 +249,7 @@ public class MTProto {
             MTBadMessage badMessage = (MTBadMessage) object;
             Logger.d(TAG, "BadMessage: " + badMessage.getErrorCode() + " #" + badMessage.getBadMsgId());
             scheduller.onMessageConfirmed(badMessage.getBadMsgId());
-            long time = scheduller.mapSchedullerId(badMessage.getBadMsgId());
+            long time = scheduller.getMessageIdGenerationTime(badMessage.getBadMsgId());
             if (time != 0) {
                 if (badMessage.getErrorCode() == ERROR_MSG_ID_TOO_BIG
                         || badMessage.getErrorCode() == ERROR_MSG_ID_TOO_SMALL) {
@@ -274,6 +274,7 @@ public class MTProto {
                     long delta = System.nanoTime() / 1000000 - time;
                     TimeOverlord.getInstance().onMethodExecuted(badMessage.getBadMsgId(), msgId, delta);
                     state.badServerSalt(salt);
+                    Logger.d(TAG, "Reschedule messages because bad_server_salt #" + badMessage.getBadMsgId());
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
                     requestSchedule();
                 } else if (badMessage.getErrorCode() == ERROR_BAD_CONTAINER ||
@@ -287,6 +288,8 @@ public class MTProto {
                     Logger.d(TAG, "Ignored BadMsg #" + badMessage.getErrorCode() + " (" + badMessage.getBadMsgId() + ", " + badMessage.getBadMsqSeqno() + ")");
                     scheduller.forgetMessageByMsgId(badMessage.getBadMsgId());
                 }
+            } else {
+                Logger.d(TAG, "Unknown package #" + badMessage.getBadMsgId());
             }
         } else if (object instanceof MTMsgsAck) {
             MTMsgsAck ack = (MTMsgsAck) object;
