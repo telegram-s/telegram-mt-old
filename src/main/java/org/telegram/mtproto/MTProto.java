@@ -45,6 +45,9 @@ public class MTProto {
     private static final int MESSAGES_CACHE = 100;
     private static final int MESSAGES_CACHE_MIN = 10;
 
+    private static final int PING_INTERVAL_REQUEST = 60000;
+    private static final int PING_INTERVAL = 75;//75 secs
+
     private static final int ERROR_MSG_ID_TOO_SMALL = 16;
     private static final int ERROR_MSG_ID_TOO_BIG = 17;
     private static final int ERROR_MSG_ID_BITS = 18;
@@ -101,6 +104,8 @@ public class MTProto {
     private int roundRobin = 0;
 
     private TransportRate connectionRate;
+
+    private long lastPingTime = System.nanoTime() / 1000000L - PING_INTERVAL_REQUEST * 10;
 
     public MTProto(AbsMTProtoState state, MTProtoCallback callback, CallWrapper callWrapper) {
         this.INSTANCE_INDEX = instanceIndex.incrementAndGet();
@@ -415,6 +420,14 @@ public class MTProto {
         }
     }
 
+    private void internalSchedule() {
+        long time = System.nanoTime() / 1000000;
+        if (time - lastPingTime > PING_INTERVAL_REQUEST) {
+            lastPingTime = time;
+            scheduller.postMessage(new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL), false, PING_INTERVAL_REQUEST);
+        }
+    }
+
     public void requestSchedule() {
         synchronized (scheduller) {
             scheduller.notifyAll();
@@ -542,6 +555,7 @@ public class MTProto {
                 }
 
                 Logger.d(TAG, "doSchedule");
+                internalSchedule();
                 synchronized (scheduller) {
                     PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId(), initedContext.contains(context.getContextId()));
                     if (preparedPackage == null) {

@@ -12,6 +12,7 @@ public class MTProtoContext extends TLContext {
     @Override
     protected void init() {
         registerClass(MTPing.CLASS_ID, MTPing.class);
+        registerClass(MTPingDelayDisconnect.CLASS_ID, MTPingDelayDisconnect.class);
         registerClass(MTPong.CLASS_ID, MTPong.class);
         registerClass(MTMsgsAck.CLASS_ID, MTMsgsAck.class);
         registerClass(MTNewSessionCreated.CLASS_ID, MTNewSessionCreated.class);
