@@ -7,10 +7,12 @@ package org.telegram.mtproto.state;
  * Time: 7:26
  */
 public class ConnectionInfo {
+    private int id;
     private String address;
     private int port;
 
-    public ConnectionInfo(String address, int port) {
+    public ConnectionInfo(int id, String address, int port) {
+        this.id = id;
         this.address = address;
         this.port = port;
     }
@@ -21,5 +23,9 @@ public class ConnectionInfo {
 
     public int getPort() {
         return port;
+    }
+
+    public int getId() {
+        return id;
     }
 }

@@ -119,13 +119,17 @@ public class MTProto {
         this.session = Entropy.generateSeed(8);
         this.tcpListener = new TcpListener();
         this.scheduller = new Scheduller(this, callWrapper);
-        this.connectionRate = new TransportRate(state.fetchConnectionInfo());
+        this.connectionRate = new TransportRate(state.getAvailableConnections());
         this.schedullerThread = new SchedullerThread();
         this.schedullerThread.start();
         this.responseProcessor = new ResponseProcessor();
         this.responseProcessor.start();
         this.connectionFixerThread = new ConnectionFixerThread();
         this.connectionFixerThread.start();
+    }
+
+    public void reloadConnectionInformation() {
+        this.connectionRate = new TransportRate(state.getAvailableConnections());
     }
 
     public int getInstanceIndex() {

@@ -26,8 +26,8 @@ public class MemoryProtoState extends AbsMTProtoState {
     }
 
     @Override
-    public ConnectionInfo fetchConnectionInfo() {
-        return new ConnectionInfo(address, port);
+    public ConnectionInfo[] getAvailableConnections() {
+        return new ConnectionInfo[]{new ConnectionInfo(0, address, port)};
     }
 
     @Override

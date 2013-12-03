@@ -14,7 +14,7 @@ public abstract class AbsMTProtoState {
 
     public abstract byte[] getAuthKey();
 
-    public abstract ConnectionInfo fetchConnectionInfo();
+    public abstract ConnectionInfo[] getAvailableConnections();
 
     public abstract KnownSalt[] readKnownSalts();
 
