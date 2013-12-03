@@ -8,13 +8,19 @@ package org.telegram.mtproto.state;
  */
 public class ConnectionInfo {
     private int id;
+    private int priority;
     private String address;
     private int port;
 
-    public ConnectionInfo(int id, String address, int port) {
+    public ConnectionInfo(int id, int priority, String address, int port) {
         this.id = id;
+        this.priority = priority;
         this.address = address;
         this.port = port;
+    }
+
+    public int getPriority() {
+        return priority;
     }
 
     public String getAddress() {

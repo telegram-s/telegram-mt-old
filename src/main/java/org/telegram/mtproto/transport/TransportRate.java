@@ -20,9 +20,16 @@ public class TransportRate {
     private Random rnd = new Random();
 
     public TransportRate(ConnectionInfo[] connectionInfos) {
+        int min = Integer.MAX_VALUE;
+        int max = Integer.MIN_VALUE;
         for (int i = 0; i < connectionInfos.length; i++) {
-            transports.put(connectionInfos[i].getId(), new Transport(new ConnectionType(connectionInfos[i].getId(), connectionInfos[i].getAddress(), connectionInfos[i].getPort(), ConnectionType.TYPE_TCP), 1.0f));
-//        transports.put(1, new Transport(new ConnectionType(1, connectionInfo.getAddress(), 443, ConnectionType.TYPE_TCP), 2.0f));
+            min = Math.min(connectionInfos[i].getPriority(), min);
+            max = Math.max(connectionInfos[i].getPriority(), max);
+        }
+        for (int i = 0; i < connectionInfos.length; i++) {
+            transports.put(connectionInfos[i].getId(),
+                    new Transport(new ConnectionType(connectionInfos[i].getId(), connectionInfos[i].getAddress(), connectionInfos[i].getPort(), ConnectionType.TYPE_TCP),
+                            connectionInfos[i].getPriority() - min + 1));
         }
         normalize();
     }
