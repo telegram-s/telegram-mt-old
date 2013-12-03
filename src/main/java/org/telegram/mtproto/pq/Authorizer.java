@@ -6,9 +6,12 @@ import org.telegram.mtproto.secure.CryptoUtils;
 import org.telegram.mtproto.secure.Entropy;
 import org.telegram.mtproto.secure.Keys;
 import org.telegram.mtproto.secure.PrimeUtils;
+import org.telegram.mtproto.state.ConnectionInfo;
 import org.telegram.mtproto.time.TimeOverlord;
 import org.telegram.mtproto.tl.pq.*;
+import org.telegram.mtproto.transport.ConnectionType;
 import org.telegram.mtproto.transport.PlainTcpConnection;
+import org.telegram.mtproto.transport.TransportRate;
 import org.telegram.tl.TLMethod;
 import org.telegram.tl.TLObject;
 
@@ -183,10 +186,20 @@ public class Authorizer {
         throw new ServerException();
     }
 
-    public PqAuth doAuth(String address, int port) {
+    public PqAuth doAuth(ConnectionInfo[] infos) {
+        TransportRate rate = new TransportRate(infos);
         for (int i = 0; i < AUTH_ATTEMPT_COUNT; i++) {
+            ConnectionType connectionType = rate.tryConnection();
             try {
-                context = new PlainTcpConnection(address, port);
+                context = new PlainTcpConnection(connectionType.getHost(), connectionType.getPort());
+                rate.onConnectionSuccess(connectionType.getId());
+            } catch (IOException e) {
+                e.printStackTrace();
+                rate.onConnectionFailure(connectionType.getId());
+                continue;
+            }
+
+            try {
                 return authAttempt();
             } catch (IOException e) {
                 e.printStackTrace();
@@ -196,6 +209,7 @@ public class Authorizer {
                     context = null;
                 }
             }
+
             try {
                 Thread.sleep(300);
             } catch (InterruptedException e) {
