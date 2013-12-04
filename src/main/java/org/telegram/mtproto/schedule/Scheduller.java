@@ -337,9 +337,11 @@ public class Scheduller {
     public synchronized PreparedPackage doSchedule(int contextId, boolean isInited) {
         ArrayList<SchedullerPackage> foundedPackages = actualPackages(contextId);
 
-        if (foundedPackages.size() == 0 &&
-                (confirmedMessages.size() <= MAX_ACK_COUNT || (System.nanoTime() - firstConfirmTime) < CONFIRM_TIMEOUT)) {
-            return null;
+        synchronized (confirmedMessages) {
+            if (foundedPackages.size() == 0 &&
+                    (confirmedMessages.size() <= MAX_ACK_COUNT || (System.nanoTime() - firstConfirmTime) < CONFIRM_TIMEOUT)) {
+                return null;
+            }
         }
 
         boolean useHighPriority = false;
@@ -383,7 +385,7 @@ public class Scheduller {
         if (foundedPackages.size() == 0 && confirmedMessages.size() != 0) {
             Long[] msgIds;
             synchronized (confirmedMessages) {
-                msgIds = confirmedMessages.toArray(new Long[0]);
+                msgIds = confirmedMessages.toArray(new Long[confirmedMessages.size()]);
                 confirmedMessages.clear();
             }
             MTMsgsAck ack = new MTMsgsAck(msgIds);
@@ -416,7 +418,6 @@ public class Scheduller {
                     MTMsgsAck ack = new MTMsgsAck(msgIds);
                     Logger.d(TAG, "Adding msg_ack: " + msgIds.length);
                     container.getMessages().add(new MTMessage(generateMessageId(), generateSeqNoWeak(), ack.serialize()));
-                    confirmedMessages.clear();
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
