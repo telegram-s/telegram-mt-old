@@ -14,22 +14,32 @@ public final class Entropy {
     private static SecureRandom random = new SecureRandom();
 
     public static byte[] generateSeed(int size) {
-        return random.generateSeed(size);
+        synchronized (random) {
+            return random.generateSeed(size);
+        }
     }
 
     public static byte[] generateSeed(byte[] sourceSeed) {
-        return xor(random.generateSeed(sourceSeed.length), sourceSeed);
+        synchronized (random) {
+            return xor(random.generateSeed(sourceSeed.length), sourceSeed);
+        }
     }
 
     public static long generateRandomId() {
-        return random.nextLong();
+        synchronized (random) {
+            return random.nextLong();
+        }
     }
 
     public static int randomInt() {
-        return random.nextInt();
+        synchronized (random) {
+            return random.nextInt();
+        }
     }
 
     public static void feedEntropy(byte[] data) {
-        random.setSeed(data);
+        synchronized (random) {
+            random.setSeed(data);
+        }
     }
 }
