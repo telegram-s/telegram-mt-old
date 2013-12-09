@@ -111,6 +111,7 @@ public class MTProto {
         this.INSTANCE_INDEX = instanceIndex.incrementAndGet();
         this.TAG = "MTProto#" + INSTANCE_INDEX;
         this.state = state;
+        this.connectionRate = new TransportRate(state.getAvailableConnections());
         this.callback = callback;
         this.authKey = state.getAuthKey();
         this.authKeyId = substring(SHA1(authKey), 12, 8);
@@ -119,7 +120,6 @@ public class MTProto {
         this.session = Entropy.generateSeed(8);
         this.tcpListener = new TcpListener();
         this.scheduller = new Scheduller(this, callWrapper);
-        this.connectionRate = new TransportRate(state.getAvailableConnections());
         this.schedullerThread = new SchedullerThread();
         this.schedullerThread.start();
         this.responseProcessor = new ResponseProcessor();
