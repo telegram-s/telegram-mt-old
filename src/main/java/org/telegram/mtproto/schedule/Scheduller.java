@@ -6,6 +6,7 @@ import org.telegram.mtproto.CallWrapper;
 import org.telegram.mtproto.MTProto;
 import org.telegram.mtproto.log.Logger;
 import org.telegram.mtproto.time.TimeOverlord;
+import org.telegram.mtproto.tl.MTInvokeAfter;
 import org.telegram.mtproto.tl.MTMessage;
 import org.telegram.mtproto.tl.MTMessagesContainer;
 import org.telegram.mtproto.tl.MTMsgsAck;
@@ -47,6 +48,7 @@ public class Scheduller {
     private long firstConfirmTime = 0;
 
     private long lastMessageId = 0;
+    private long lastDependId = 0;
     private int seqNo = 0;
 
     private CallWrapper wrapper;
@@ -64,6 +66,7 @@ public class Scheduller {
         while (idGenerationTime.containsKey(messageId)) {
             messageId += 4;
         }
+        lastMessageId = messageId;
         idGenerationTime.put(messageId, getCurrentTime());
         currentMessageGeneration.add(messageId);
         return messageId;
@@ -109,6 +112,7 @@ public class Scheduller {
         schedullerPackage.isRpc = isRpc;
         schedullerPackage.queuedToChannel = contextId;
         schedullerPackage.priority = highPrioroty ? PRIORITY_HIGH : PRIORITY_NORMAL;
+        schedullerPackage.isDepend = highPrioroty;
         schedullerPackage.supportTag = object.toString();
         messages.put(id, schedullerPackage);
         return id;
@@ -167,14 +171,17 @@ public class Scheduller {
 
     public void resetMessageId() {
         lastMessageId = 0;
+        lastDependId = 0;
     }
 
     public void resetSession() {
         lastMessageId = 0;
+        lastDependId = 0;
         seqNo = 0;
         currentMessageGeneration.clear();
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             schedullerPackage.idGenerationTime = 0;
+            schedullerPackage.dependMessageId = 0;
             schedullerPackage.messageId = 0;
             schedullerPackage.seqNo = 0;
         }
@@ -192,6 +199,7 @@ public class Scheduller {
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             if (schedullerPackage.relatedMessageIds.contains(msgId)) {
                 schedullerPackage.idGenerationTime = 0;
+                schedullerPackage.dependMessageId = 0;
                 schedullerPackage.messageId = 0;
                 schedullerPackage.seqNo = 0;
                 schedullerPackage.state = STATE_QUEUED;
@@ -427,10 +435,35 @@ public class Scheduller {
                 if (schedullerPackage.idGenerationTime == 0) {
                     generateParams(schedullerPackage);
                 }
-                Logger.d(TAG, "Adding package: #" + schedullerPackage.id + " " + schedullerPackage.supportTag + " (" + schedullerPackage.messageId + ", " + schedullerPackage.seqNo + ")");
+
+                if (schedullerPackage.isDepend) {
+                    if (schedullerPackage.dependMessageId == 0) {
+                        if (lastDependId > 0) {
+                            schedullerPackage.dependMessageId = lastDependId;
+                        } else {
+                            schedullerPackage.dependMessageId = -1;
+                        }
+                    }
+
+                    lastDependId = schedullerPackage.messageId;
+                }
                 schedullerPackage.writtenToChannel = contextId;
                 schedullerPackage.lastAttemptTime = getCurrentTime();
-                container.getMessages().add(new MTMessage(schedullerPackage.messageId, schedullerPackage.seqNo, schedullerPackage.serialized));
+                if (schedullerPackage.isDepend && schedullerPackage.dependMessageId > 0) {
+
+                    Logger.d(TAG, "Adding package: #" + schedullerPackage.id + " " + schedullerPackage.supportTag + " (" + schedullerPackage.messageId + " on " + schedullerPackage.dependMessageId + ", " + schedullerPackage.seqNo + ")");
+
+                    MTInvokeAfter invokeAfter = new MTInvokeAfter(schedullerPackage.dependMessageId, schedullerPackage.serialized);
+                    try {
+                        container.getMessages().add(new MTMessage(schedullerPackage.messageId, schedullerPackage.seqNo, invokeAfter.serialize()));
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        // Never happens
+                    }
+                } else {
+                    Logger.d(TAG, "Adding package: #" + schedullerPackage.id + " " + schedullerPackage.supportTag + " (" + schedullerPackage.messageId + ", " + schedullerPackage.seqNo + ")");
+                    container.getMessages().add(new MTMessage(schedullerPackage.messageId, schedullerPackage.seqNo, schedullerPackage.serialized));
+                }
             }
 
             long containerMessageId = generateMessageId();
@@ -517,7 +550,11 @@ public class Scheduller {
 
         public int priority = PRIORITY_NORMAL;
 
+        public boolean isDepend;
+
+
         public long idGenerationTime;
+        public long dependMessageId;
         public long messageId;
         public int seqNo;
         public HashSet<Integer> relatedFastConfirm = new HashSet<Integer>();
