@@ -43,7 +43,7 @@ public class TcpContext {
 
     private static final int READ_TIMEOUT = 1000;
 
-    private static final int READ_DIE_TIMEOUT = 5 * 1000; // 15 sec
+    private static final int READ_DIE_TIMEOUT = 5 * 1000; // 5 sec
 
     private final String ip;
     private final int port;
