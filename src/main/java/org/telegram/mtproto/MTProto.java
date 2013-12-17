@@ -743,12 +743,15 @@ public class MTProto {
             if (isClosed) {
                 return;
             }
-            Logger.d(TAG, "onChannelBroken (#" + context.getContextId() + ")");
+            int contextId = context.getContextId();
+            Logger.d(TAG, "onChannelBroken (#" + contextId + ")");
             synchronized (contexts) {
                 contexts.remove(context);
                 contexts.notifyAll();
-                if (!connectedContexts.contains(context.getContextId())) {
-                    connectionRate.onConnectionFailure(contextConnectionId.get(context.getContextId()));
+                if (connectedContexts.contains(contextId)) {
+                    if (contextConnectionId.containsKey(contextId)) {
+                        connectionRate.onConnectionFailure(contextConnectionId.get(contextId));
+                    }
                 }
             }
             scheduller.onConnectionDies(context.getContextId());
