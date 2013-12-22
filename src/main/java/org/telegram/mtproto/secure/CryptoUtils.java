@@ -327,4 +327,13 @@ public class CryptoUtils {
             return res;
         }
     }
+
+    public static boolean isZero(byte[] src) {
+        for (int i = 0; i < src.length; i++) {
+            if (src[i] != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
 }
