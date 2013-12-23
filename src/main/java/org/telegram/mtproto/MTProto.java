@@ -45,6 +45,8 @@ public class MTProto {
     private static final int MESSAGES_CACHE = 100;
     private static final int MESSAGES_CACHE_MIN = 10;
 
+    private static final int MAX_INTERNAL_FLOOD_WAIT = 10;//10 sec
+
     private static final int PING_INTERVAL_REQUEST = 10000;
     private static final int PING_INTERVAL = 75;//75 secs
 
@@ -331,9 +333,11 @@ public class MTProto {
                             if (error.getErrorTag().startsWith("FLOOD_WAIT_")) {
                                 // Secs
                                 int delay = Integer.parseInt(error.getErrorTag().substring("FLOOD_WAIT_".length()));
-                                scheduller.resendAsNewMessageDelayed(result.getMessageId(), delay * 1000);
-                                requestSchedule();
-                                return;
+                                if (delay <= MAX_INTERNAL_FLOOD_WAIT) {
+                                    scheduller.resendAsNewMessageDelayed(result.getMessageId(), delay * 1000);
+                                    requestSchedule();
+                                    return;
+                                }
                             }
                         }
                         if (error.getErrorCode() == 401) {
