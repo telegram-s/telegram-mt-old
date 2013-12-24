@@ -508,14 +508,21 @@ public class TcpContext {
         long start = System.nanoTime();
         while (offset < res.length) {
             int readed = stream.read(res, offset, res.length - offset);
-            onRead();
             if (readed > 0) {
                 offset += readed;
+                onRead();
+            } else if (readed < 0) {
+                throw new IOException();
             } else {
                 if (System.nanoTime() - start > timeout * 1000000L) {
                     throw new IOException();
                 }
-                Thread.yield();
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                    throw new IOException();
+                }
             }
         }
         return res;
@@ -529,10 +536,16 @@ public class TcpContext {
             onRead();
             if (readed > 0) {
                 offset += readed;
+                onRead();
             } else if (readed < 0) {
                 throw new IOException();
             } else {
-                Thread.yield();
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                    throw new IOException();
+                }
             }
         }
         return res;
