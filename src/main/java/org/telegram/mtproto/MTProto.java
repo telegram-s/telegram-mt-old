@@ -515,6 +515,12 @@ public class MTProto {
         int msg_len = StreamingUtils.readInt(bodyStream);
         byte[] message = readBytes(msg_len, bodyStream);
 
+        byte[] checkHash = SHA1(concat(serverSalt, session, longToBytes(messageId), intToBytes(mes_seq), intToBytes(msg_len), message));
+
+        if (!arrayEq(substring(checkHash, 4, 16), msgKey)) {
+            throw new SecurityException();
+        }
+
 //        if (!arrayEq(session, this.session)) {
 //            throw new TransportSecurityException();
 //        }
