@@ -541,14 +541,14 @@ public class MTProto {
         }
 
         if (TimeOverlord.getInstance().getTimeAccuracy() < 10 * 1000) {
-            long time = (messageId >> 32) * 1000;
+            long time = (messageId >> 32);
             long serverTime = TimeOverlord.getInstance().getServerTime();
 
-            if (serverTime + 30 * 1000 < time) {
+            if (serverTime + 30 < time) {
                 return null;
             }
 
-            if (time < serverTime - 300 * 1000) {
+            if (time < serverTime - 300) {
                 return null;
             }
         }
