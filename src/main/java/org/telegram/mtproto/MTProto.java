@@ -516,6 +516,10 @@ public class MTProto {
 
         int bodySize = rawMessage.length - 32;
 
+        if (msg_len % 4 != 0) {
+            throw new SecurityException();
+        }
+
         if (msg_len > bodySize) {
             throw new SecurityException();
         }
