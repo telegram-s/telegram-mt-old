@@ -440,6 +440,7 @@ public class TcpContext {
         @Override
         public void run() {
             while (!isBroken) {
+                Logger.d(TAG, "DieThread iteration");
                 if (lastWriteEvent != 0) {
                     long delta = (System.nanoTime() - lastWriteEvent) / (1000 * 1000);
                     if (delta >= READ_DIE_TIMEOUT) {
