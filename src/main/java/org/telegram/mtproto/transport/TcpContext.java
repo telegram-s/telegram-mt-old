@@ -421,19 +421,21 @@ public class TcpContext {
     }
 
     private void onWrite() {
+        Logger.d(TAG, "onWrite");
         lastWriteEvent = System.nanoTime();
         notifyDieThread();
     }
 
     private void onRead() {
+        Logger.d(TAG, "onRead");
         lastWriteEvent = 0;
         notifyDieThread();
     }
 
     private void notifyDieThread() {
-        synchronized (dieThread) {
-            dieThread.notifyAll();
-        }
+//        synchronized (dieThread) {
+//            dieThread.notifyAll();
+//        }
     }
 
     private class DieThread extends Thread {
@@ -447,25 +449,28 @@ public class TcpContext {
                         Logger.d(TAG, "Dies by timeout");
                         breakContext();
                     } else {
-                        synchronized (this) {
-                            try {
-                                wait(Math.max(READ_DIE_TIMEOUT - delta, 100));
-                            } catch (InterruptedException e) {
-                                return;
-                            }
-                        }
-                    }
-                } else {
-                    synchronized (this) {
                         try {
-                            wait(READ_DIE_TIMEOUT);
+                            int waitDelta = (int) (READ_DIE_TIMEOUT - delta);
+                            Logger.d(TAG, "DieThread wait: " + waitDelta);
+                            sleep(Math.max(waitDelta, 1000));
+                            Logger.d(TAG, "DieThread start wait end");
                         } catch (InterruptedException e) {
+                            Logger.d(TAG, "DieThread exit");
                             return;
                         }
                     }
+                } else {
+                    try {
+                        Logger.d(TAG, "DieThread start common wait");
+                        sleep(READ_DIE_TIMEOUT);
+                        Logger.d(TAG, "DieThread end common wait");
+                    } catch (InterruptedException e) {
+                        Logger.d(TAG, "DieThread exit");
+                        return;
+                    }
                 }
-
             }
+            Logger.d(TAG, "DieThread exit");
         }
     }
 
