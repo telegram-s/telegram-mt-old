@@ -513,6 +513,17 @@ public class MTProto {
         int mes_seq = StreamingUtils.readInt(bodyStream);
 
         int msg_len = StreamingUtils.readInt(bodyStream);
+
+        int bodySize = rawMessage.length - 32;
+
+        if (msg_len > bodySize) {
+            throw new SecurityException();
+        }
+
+        if (msg_len - bodySize > 15) {
+            throw new SecurityException();
+        }
+
         byte[] message = readBytes(msg_len, bodyStream);
 
         byte[] checkHash = SHA1(concat(serverSalt, session, longToBytes(messageId), intToBytes(mes_seq), intToBytes(msg_len), message));
@@ -521,9 +532,22 @@ public class MTProto {
             throw new SecurityException();
         }
 
-//        if (!arrayEq(session, this.session)) {
-//            throw new TransportSecurityException();
-//        }
+        if (!arrayEq(session, this.session)) {
+            return null;
+        }
+
+        if (TimeOverlord.getInstance().getTimeAccuracy() < 10 * 1000) {
+            long time = (messageId >> 32) * 1000;
+            long serverTime = TimeOverlord.getInstance().getServerTime();
+
+            if (serverTime + 30 * 1000 > time) {
+                return null;
+            }
+
+            if (time < serverTime - 300 * 1000) {
+                return null;
+            }
+        }
 
         return new MTMessage(messageId, mes_seq, message);
     }
@@ -694,6 +718,9 @@ public class MTProto {
             }
             try {
                 MTMessage decrypted = decrypt(data);
+                if (decrypted == null) {
+                    return;
+                }
                 if (!connectedContexts.contains(context.getContextId())) {
                     connectedContexts.add(context.getContextId());
                     connectionRate.onConnectionSuccess(contextConnectionId.get(context.getContextId()));
