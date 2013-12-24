@@ -47,7 +47,7 @@ public class MTProto {
 
     private static final int MAX_INTERNAL_FLOOD_WAIT = 10;//10 sec
 
-    private static final int PING_INTERVAL_REQUEST = 10000;
+    private static final int PING_INTERVAL_REQUEST = 60000;
     private static final int PING_INTERVAL = 75;//75 secs
 
     private static final int ERROR_MSG_ID_TOO_SMALL = 16;
