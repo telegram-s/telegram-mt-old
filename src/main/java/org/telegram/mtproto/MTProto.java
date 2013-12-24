@@ -544,7 +544,7 @@ public class MTProto {
             long time = (messageId >> 32) * 1000;
             long serverTime = TimeOverlord.getInstance().getServerTime();
 
-            if (serverTime + 30 * 1000 > time) {
+            if (serverTime + 30 * 1000 < time) {
                 return null;
             }
 
