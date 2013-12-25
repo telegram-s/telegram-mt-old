@@ -451,9 +451,9 @@ public class TcpContext {
                     } else {
                         try {
                             int waitDelta = (int) (READ_DIE_TIMEOUT - delta);
-                            Logger.d(TAG, "DieThread wait: " + waitDelta);
+                            // Logger.d(TAG, "DieThread wait: " + waitDelta);
                             sleep(Math.max(waitDelta, 1000));
-                            Logger.d(TAG, "DieThread start wait end");
+                            // Logger.d(TAG, "DieThread start wait end");
                         } catch (InterruptedException e) {
                             Logger.d(TAG, "DieThread exit");
                             return;
@@ -461,9 +461,9 @@ public class TcpContext {
                     }
                 } else {
                     try {
-                        Logger.d(TAG, "DieThread start common wait");
+                        // Logger.d(TAG, "DieThread start common wait");
                         sleep(READ_DIE_TIMEOUT);
-                        Logger.d(TAG, "DieThread end common wait");
+                        // Logger.d(TAG, "DieThread end common wait");
                     } catch (InterruptedException e) {
                         Logger.d(TAG, "DieThread exit");
                         return;

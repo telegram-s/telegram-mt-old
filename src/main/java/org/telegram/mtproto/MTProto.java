@@ -423,6 +423,8 @@ public class MTProto {
             } else {
                 scheduller.postMessage(new MTNeedResendMessage(new long[]{detailedInfo.getAnswerMsgId()}), false, RESEND_TIMEOUT);
             }
+        } else if (object instanceof MTNewSessionCreated) {
+            callback.onSessionCreated(this);
         } else {
             Logger.d(TAG, "Ignored MTProto message " + object.toString());
         }
