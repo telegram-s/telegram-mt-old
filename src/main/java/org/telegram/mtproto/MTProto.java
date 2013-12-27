@@ -1,5 +1,6 @@
 package org.telegram.mtproto;
 
+import org.telegram.mtproto.backoff.ExponentalBackoff;
 import org.telegram.mtproto.log.Logger;
 import org.telegram.mtproto.schedule.PreparedPackage;
 import org.telegram.mtproto.schedule.Scheduller;
@@ -109,9 +110,12 @@ public class MTProto {
 
     private long lastPingTime = System.nanoTime() / 1000000L - PING_INTERVAL_REQUEST * 10;
 
+    private ExponentalBackoff exponentalBackoff;
+
     public MTProto(AbsMTProtoState state, MTProtoCallback callback, CallWrapper callWrapper, int connectionsCount) {
         this.INSTANCE_INDEX = instanceIndex.incrementAndGet();
         this.TAG = "MTProto#" + INSTANCE_INDEX;
+        this.exponentalBackoff = new ExponentalBackoff(TAG + "#BackOff");
         this.state = state;
         this.connectionRate = new TransportRate(state.getAvailableConnections());
         this.callback = callback;
@@ -128,6 +132,10 @@ public class MTProto {
         this.responseProcessor.start();
         this.connectionFixerThread = new ConnectionFixerThread();
         this.connectionFixerThread.start();
+    }
+
+    public void resetNetworkBackoff() {
+        this.exponentalBackoff.reset();
     }
 
     public void reloadConnectionInformation() {
@@ -547,13 +555,13 @@ public class MTProto {
             long serverTime = TimeOverlord.getInstance().getServerTime();
 
             if (serverTime + 30 < time) {
-                Logger.w(TAG, "Ignored message: " + time + " with server time: " + serverTime);
-                return null;
+                Logger.w(TAG, "Incorrect message time: " + time + " with server time: " + serverTime);
+                // return null;
             }
 
             if (time < serverTime - 300) {
-                Logger.w(TAG, "Ignored message: " + time + " with server time: " + serverTime);
-                return null;
+                Logger.w(TAG, "Incorrect message time: " + time + " with server time: " + serverTime);
+                // return null;
             }
         }
 
@@ -601,7 +609,17 @@ public class MTProto {
                     if (currentContexts.length != 0) {
                         roundRobin = (roundRobin + 1) % currentContexts.length;
                         context = currentContexts[roundRobin];
-                    } else {
+                    }
+                }
+
+                if (context == null) {
+                    synchronized (scheduller) {
+                        try {
+                            scheduller.wait();
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                            return;
+                        }
                         continue;
                     }
                 }
@@ -706,6 +724,12 @@ public class MTProto {
                     }
                 } catch (IOException e) {
                     e.printStackTrace();
+                    try {
+                        exponentalBackoff.onFailure();
+                    } catch (InterruptedException e1) {
+                        e1.printStackTrace();
+                        return;
+                    }
                     connectionRate.onConnectionFailure(type.getId());
                     try {
                         Thread.sleep(1000);
@@ -732,6 +756,7 @@ public class MTProto {
                 }
                 if (!connectedContexts.contains(context.getContextId())) {
                     connectedContexts.add(context.getContextId());
+                    exponentalBackoff.onSuccess();
                     connectionRate.onConnectionSuccess(contextConnectionId.get(context.getContextId()));
                 }
 
@@ -764,6 +789,7 @@ public class MTProto {
                 synchronized (contexts) {
                     context.close();
                     if (!connectedContexts.contains(context.getContextId())) {
+                        exponentalBackoff.onFailureNoWait();
                         connectionRate.onConnectionFailure(contextConnectionId.get(context.getContextId()));
                     }
                     contexts.remove(context);
@@ -793,12 +819,13 @@ public class MTProto {
             Logger.d(TAG, "onChannelBroken (#" + contextId + ")");
             synchronized (contexts) {
                 contexts.remove(context);
-                contexts.notifyAll();
                 if (connectedContexts.contains(contextId)) {
                     if (contextConnectionId.containsKey(contextId)) {
+                        exponentalBackoff.onFailureNoWait();
                         connectionRate.onConnectionFailure(contextConnectionId.get(contextId));
                     }
                 }
+                contexts.notifyAll();
             }
             scheduller.onConnectionDies(context.getContextId());
             requestSchedule();
