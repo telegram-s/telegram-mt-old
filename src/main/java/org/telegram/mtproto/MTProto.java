@@ -542,18 +542,20 @@ public class MTProto {
             return null;
         }
 
-//        if (TimeOverlord.getInstance().getTimeAccuracy() < 10) {
-//            long time = (messageId >> 32);
-//            long serverTime = TimeOverlord.getInstance().getServerTime();
-//
-//            if (serverTime + 30 < time) {
-//                return null;
-//            }
-//
-//            if (time < serverTime - 300) {
-//                return null;
-//            }
-//        }
+        if (TimeOverlord.getInstance().getTimeAccuracy() < 10) {
+            long time = (messageId >> 32);
+            long serverTime = TimeOverlord.getInstance().getServerTime();
+
+            if (serverTime + 30 < time) {
+                Logger.w(TAG, "Ignored message: " + time + " with server time: " + serverTime);
+                return null;
+            }
+
+            if (time < serverTime - 300) {
+                Logger.w(TAG, "Ignored message: " + time + " with server time: " + serverTime);
+                return null;
+            }
+        }
 
         return new MTMessage(messageId, mes_seq, message);
     }
