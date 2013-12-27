@@ -542,18 +542,18 @@ public class MTProto {
             return null;
         }
 
-        if (TimeOverlord.getInstance().getTimeAccuracy() < 10) {
-            long time = (messageId >> 32);
-            long serverTime = TimeOverlord.getInstance().getServerTime();
-
-            if (serverTime + 30 < time) {
-                return null;
-            }
-
-            if (time < serverTime - 300) {
-                return null;
-            }
-        }
+//        if (TimeOverlord.getInstance().getTimeAccuracy() < 10) {
+//            long time = (messageId >> 32);
+//            long serverTime = TimeOverlord.getInstance().getServerTime();
+//
+//            if (serverTime + 30 < time) {
+//                return null;
+//            }
+//
+//            if (time < serverTime - 300) {
+//                return null;
+//            }
+//        }
 
         return new MTMessage(messageId, mes_seq, message);
     }
@@ -725,6 +725,7 @@ public class MTProto {
             try {
                 MTMessage decrypted = decrypt(data);
                 if (decrypted == null) {
+                    Logger.d(TAG, "message ignored");
                     return;
                 }
                 if (!connectedContexts.contains(context.getContextId())) {
