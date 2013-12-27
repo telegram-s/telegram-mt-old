@@ -637,6 +637,11 @@ public class MTProto {
                         } catch (InterruptedException e) {
                             return;
                         }
+                        try {
+                            Thread.sleep(1000);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
                         continue;
                     }
 
