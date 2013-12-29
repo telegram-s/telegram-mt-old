@@ -226,7 +226,7 @@ public class TcpContext {
                                 return;
                             }
                             Logger.d(TAG, "Start reading message: " + length);
-                            if (length == 0) {
+                            if (length <= 0) {
                                 breakContext();
                                 return;
                             }
