@@ -2,6 +2,7 @@ package org.telegram.mtproto;
 
 import org.telegram.mtproto.backoff.ExponentalBackoff;
 import org.telegram.mtproto.log.Logger;
+import org.telegram.mtproto.schedule.PrepareSchedule;
 import org.telegram.mtproto.schedule.PreparedPackage;
 import org.telegram.mtproto.schedule.Scheduller;
 import org.telegram.mtproto.secure.Entropy;
@@ -221,6 +222,7 @@ public class MTProto {
 
     public int sendMessage(TLObject request, long timeout, boolean isRpc, boolean highPriority) {
         int id = scheduller.postMessage(request, isRpc, timeout, highPriority);
+        Logger.d(TAG, "sendMessage #" + id + " " + request.toString());
         synchronized (scheduller) {
             scheduller.notifyAll();
         }
@@ -588,16 +590,27 @@ public class MTProto {
 
         @Override
         public void run() {
+            PrepareSchedule prepareSchedule = new PrepareSchedule();
             while (!isClosed) {
                 Logger.d(TAG, "Scheduller Iteration");
+
+                int[] contextIds;
+                synchronized (contexts) {
+                    TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
+                    contextIds = new int[currentContexts.length];
+                    for (int i = 0; i < contextIds.length; i++) {
+                        contextIds[i] = currentContexts[i].getContextId();
+                    }
+                }
+
                 synchronized (scheduller) {
-                    if (contexts.size() == 0) {
+                    scheduller.prepareScheduller(prepareSchedule, contextIds);
+                    if (prepareSchedule.isDoWait()) {
+                        Logger.d(TAG, "Scheduller:wait " + prepareSchedule.getDelay());
                         try {
-                            long delay = scheduller.getSchedullerDelay(false);
-                            if (delay > 0) {
-                                scheduller.wait(delay);
-                            }
+                            scheduller.wait(prepareSchedule.getDelay());
                         } catch (InterruptedException e) {
+                            e.printStackTrace();
                             return;
                         }
                     }
@@ -606,42 +619,34 @@ public class MTProto {
                 TcpContext context = null;
                 synchronized (contexts) {
                     TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
+                    outer:
+                    for (int i = 0; i < currentContexts.length; i++) {
+                        int index = (i + roundRobin + 1) % currentContexts.length;
+                        for (int allowed : prepareSchedule.getAllowedContexts()) {
+                            if (currentContexts[i].getContextId() == allowed) {
+                                context = currentContexts[index];
+                                break outer;
+                            }
+                        }
+
+                    }
+
                     if (currentContexts.length != 0) {
                         roundRobin = (roundRobin + 1) % currentContexts.length;
-                        context = currentContexts[roundRobin];
                     }
                 }
 
                 if (context == null) {
-                    synchronized (scheduller) {
-                        try {
-                            scheduller.wait();
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                            return;
-                        }
-                        continue;
-                    }
+                    continue;
                 }
 
                 Logger.d(TAG, "doSchedule");
                 internalSchedule();
                 synchronized (scheduller) {
+                    long start = System.currentTimeMillis();
                     PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId(), initedContext.contains(context.getContextId()));
+                    Logger.d(TAG, "Schedulled in " + (System.currentTimeMillis() - start) + " ms");
                     if (preparedPackage == null) {
-                        try {
-                            long delay = scheduller.getSchedullerDelay(true);
-                            if (delay > 0) {
-                                scheduller.wait(delay);
-                            }
-                        } catch (InterruptedException e) {
-                            return;
-                        }
-                        try {
-                            Thread.sleep(1000);
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
                         continue;
                     }
 
@@ -715,7 +720,7 @@ public class MTProto {
 
                 ConnectionType type = connectionRate.tryConnection();
                 try {
-                    TcpContext context = new TcpContext(MTProto.this, type.getHost(), type.getPort(), false, tcpListener);
+                    TcpContext context = new TcpContext(MTProto.this, type.getHost(), type.getPort(), true, tcpListener);
                     if (isClosed) {
                         return;
                     }
