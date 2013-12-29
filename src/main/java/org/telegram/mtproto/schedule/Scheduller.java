@@ -153,19 +153,39 @@ public class Scheduller {
         boolean doWait = true;
         HashSet<Integer> supportedConnections = new HashSet<Integer>();
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
+            boolean isPendingPackage = false;
+            long packageTime = 0;
+
             if (schedullerPackage.state == STATE_QUEUED) {
+                isPendingPackage = true;
+                if (schedullerPackage.scheduleTime <= time) {
+                    packageTime = 0;
+                } else {
+                    packageTime = Math.max(schedullerPackage.scheduleTime - time, 0);
+                }
+            } else if (schedullerPackage.state == STATE_SENT) {
+                if (getCurrentTime() <= schedullerPackage.expiresTime) {
+                    if (schedullerPackage.serialized == null || schedullerPackage.serialized.length < BIG_MESSAGE_SIZE) {
+                        if (time - schedullerPackage.lastAttemptTime >= RETRY_TIMEOUT) {
+                            isPendingPackage = true;
+                            packageTime = 0;
+                        }
+                    }
+                }
+            }
+
+            if (isPendingPackage) {
                 if (schedullerPackage.queuedToChannel == -1) {
                     allConnections = true;
                 } else {
                     supportedConnections.add(schedullerPackage.queuedToChannel);
                 }
 
-                if (schedullerPackage.scheduleTime <= time) {
+                if (packageTime == 0) {
                     minDelay = 0;
                     doWait = false;
                 } else {
-                    long delta = schedullerPackage.scheduleTime - time;
-                    minDelay = Math.min(delta, minDelay);
+                    minDelay = Math.min(packageTime, minDelay);
                 }
             }
         }
