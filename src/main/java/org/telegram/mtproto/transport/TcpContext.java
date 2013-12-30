@@ -319,7 +319,7 @@ public class TcpContext {
                         return;
                     }
                 }
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 Logger.e(TAG, e);
                 breakContext();
             }
