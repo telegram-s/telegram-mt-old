@@ -613,6 +613,7 @@ public class MTProto {
                             e.printStackTrace();
                             return;
                         }
+                        continue;
                     }
                 }
 
@@ -623,7 +624,7 @@ public class MTProto {
                     for (int i = 0; i < currentContexts.length; i++) {
                         int index = (i + roundRobin + 1) % currentContexts.length;
                         for (int allowed : prepareSchedule.getAllowedContexts()) {
-                            if (currentContexts[i].getContextId() == allowed) {
+                            if (currentContexts[index].getContextId() == allowed) {
                                 context = currentContexts[index];
                                 break outer;
                             }
@@ -637,6 +638,7 @@ public class MTProto {
                 }
 
                 if (context == null) {
+                    Logger.d(TAG, "Scheduller: no context");
                     continue;
                 }
 

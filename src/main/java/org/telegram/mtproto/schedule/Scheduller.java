@@ -145,6 +145,7 @@ public class Scheduller {
         if (connectionIds.length == 0) {
             prepareSchedule.setDelay(SCHEDULLER_TIMEOUT);
             prepareSchedule.setAllowedContexts(connectionIds);
+            prepareSchedule.setDoWait(true);
             return;
         }
 
