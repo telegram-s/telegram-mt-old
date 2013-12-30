@@ -198,6 +198,7 @@ public class TcpContext {
     private class ReaderThread extends Thread {
         private ReaderThread() {
             setPriority(Thread.MIN_PRIORITY);
+            setName(TAG + "#Reader" + hashCode());
         }
 
         @Override
@@ -328,6 +329,11 @@ public class TcpContext {
     private class WriterThread extends Thread {
         private final ConcurrentLinkedQueue<Package> packages = new ConcurrentLinkedQueue<Package>();
 
+        public WriterThread() {
+            setPriority(Thread.MIN_PRIORITY);
+            setName(TAG + "#Writer" + hashCode());
+        }
+
         public void pushPackage(Package p) {
             packages.add(p);
             synchronized (packages) {
@@ -439,6 +445,11 @@ public class TcpContext {
     }
 
     private class DieThread extends Thread {
+        public DieThread() {
+            setPriority(Thread.MIN_PRIORITY);
+            setName(TAG + "#DieThread" + hashCode());
+        }
+
         @Override
         public void run() {
             while (!isBroken) {
