@@ -70,27 +70,33 @@ public class TcpContext {
     private long lastWriteEvent = 0;
 
     public TcpContext(MTProto proto, String ip, int port, boolean checksum, TcpContextCallback callback) throws IOException {
-        this.contextId = contextLastId.incrementAndGet();
-        this.TAG = "MTProto#" + proto.getInstanceIndex() + "#Transport" + contextId;
-        this.ip = ip;
-        this.port = port;
-        this.useChecksum = checksum;
-        this.socket = new Socket();
-        this.socket.connect(new InetSocketAddress(ip, port), CONNECTION_TIMEOUT);
-        this.socket.setKeepAlive(true);
-        this.socket.setTcpNoDelay(true);
-        if (!useChecksum) {
-            socket.getOutputStream().write(0xef);
+        try {
+            this.contextId = contextLastId.incrementAndGet();
+            this.TAG = "MTProto#" + proto.getInstanceIndex() + "#Transport" + contextId;
+            this.ip = ip;
+            this.port = port;
+            this.useChecksum = checksum;
+            this.socket = new Socket();
+            this.socket.connect(new InetSocketAddress(ip, port), CONNECTION_TIMEOUT);
+            this.socket.setKeepAlive(true);
+            this.socket.setTcpNoDelay(true);
+            if (!useChecksum) {
+                socket.getOutputStream().write(0xef);
+            }
+            this.isClosed = false;
+            this.isBroken = false;
+            this.callback = callback;
+            this.readerThread = new ReaderThread();
+            this.writerThread = new WriterThread();
+            this.dieThread = new DieThread();
+            this.readerThread.start();
+            this.writerThread.start();
+            this.dieThread.start();
+        } catch (IOException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new IOException();
         }
-        this.isClosed = false;
-        this.isBroken = false;
-        this.callback = callback;
-        this.readerThread = new ReaderThread();
-        this.writerThread = new WriterThread();
-        this.dieThread = new DieThread();
-        this.readerThread.start();
-        this.writerThread.start();
-        this.dieThread.start();
     }
 
     public int getContextId() {
