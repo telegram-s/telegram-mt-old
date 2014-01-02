@@ -3,6 +3,7 @@ package org.telegram.mtproto.transport;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 
 import static org.telegram.tl.StreamingUtils.readBytes;
@@ -17,12 +18,15 @@ import static org.telegram.tl.StreamingUtils.writeByteArray;
  */
 public class PlainTcpConnection {
 
+    private static final int CONNECTION_TIMEOUT = 5 * 1000;
+
     private Socket socket;
 
     private boolean isBroken;
 
     public PlainTcpConnection(String ip, int port) throws IOException {
-        this.socket = new Socket(ip, port);
+        this.socket = new Socket();
+        this.socket.connect(new InetSocketAddress(ip, port), CONNECTION_TIMEOUT);
         this.socket.setKeepAlive(true);
         this.socket.setTcpNoDelay(true);
         this.socket.getOutputStream().write(0xef);
