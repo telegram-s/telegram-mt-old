@@ -2,6 +2,7 @@ package org.telegram.mtproto.pq;
 
 import org.telegram.mtproto.ServerException;
 import org.telegram.mtproto.TransportSecurityException;
+import org.telegram.mtproto.log.Logger;
 import org.telegram.mtproto.secure.CryptoUtils;
 import org.telegram.mtproto.secure.Entropy;
 import org.telegram.mtproto.secure.Keys;
@@ -30,6 +31,7 @@ import static org.telegram.tl.StreamingUtils.*;
  * Time: 4:11
  */
 public class Authorizer {
+    private static final String TAG = "Authorizer";
     private static final int AUTH_ATTEMPT_COUNT = 5;
     private static final int AUTH_RETRY_COUNT = 5;
 
@@ -194,7 +196,7 @@ public class Authorizer {
                 context = new PlainTcpConnection(connectionType.getHost(), connectionType.getPort());
                 rate.onConnectionSuccess(connectionType.getId());
             } catch (IOException e) {
-                e.printStackTrace();
+                Logger.e(TAG, e);
                 rate.onConnectionFailure(connectionType.getId());
                 continue;
             }
@@ -202,7 +204,7 @@ public class Authorizer {
             try {
                 return authAttempt();
             } catch (IOException e) {
-                e.printStackTrace();
+                Logger.e(TAG, e);
             } finally {
                 if (context != null) {
                     context.destroy();

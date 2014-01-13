@@ -433,13 +433,11 @@ public class TcpContext {
     }
 
     private void onWrite() {
-        Logger.d(TAG, "onWrite");
         lastWriteEvent = System.nanoTime();
         notifyDieThread();
     }
 
     private void onRead() {
-        Logger.d(TAG, "onRead");
         lastWriteEvent = 0;
         notifyDieThread();
     }
@@ -537,7 +535,7 @@ public class TcpContext {
                 try {
                     Thread.sleep(100);
                 } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    Logger.e(TAG, e);
                     throw new IOException();
                 }
             }
@@ -560,7 +558,7 @@ public class TcpContext {
                 try {
                     Thread.sleep(100);
                 } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    Logger.e(TAG, e);
                     throw new IOException();
                 }
             }

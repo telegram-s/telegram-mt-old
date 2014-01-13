@@ -254,7 +254,7 @@ public class MTProto {
         } catch (DeserializeException e) {
             onApiMessage(mtMessage.getContent());
         } catch (IOException e) {
-            e.printStackTrace();
+            Logger.e(TAG, e);
             // ???
         }
     }
@@ -366,7 +366,7 @@ public class MTProto {
                         callback.onRpcError(id, error.getErrorCode(), error.getMessage(), this);
                         scheduller.forgetMessage(id);
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        Logger.e(TAG, e);
                         return;
                     }
                 } else {
@@ -610,7 +610,7 @@ public class MTProto {
                         try {
                             scheduller.wait(prepareSchedule.getDelay());
                         } catch (InterruptedException e) {
-                            e.printStackTrace();
+                            Logger.e(TAG, e);
                             return;
                         }
                         continue;
@@ -667,7 +667,7 @@ public class MTProto {
                             scheduller.onConnectionDies(context.getContextId());
                         }
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        Logger.e(TAG, e);
                     }
                 }
             }
@@ -735,18 +735,18 @@ public class MTProto {
                         scheduller.notifyAll();
                     }
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    Logger.e(TAG, e);
                     try {
                         exponentalBackoff.onFailure();
                     } catch (InterruptedException e1) {
-                        e1.printStackTrace();
+                        Logger.e(TAG, e1);
                         return;
                     }
                     connectionRate.onConnectionFailure(type.getId());
                     try {
                         Thread.sleep(1000);
                     } catch (InterruptedException e1) {
-                        e1.printStackTrace();
+                        Logger.e(TAG, e1);
                     }
                 }
             }

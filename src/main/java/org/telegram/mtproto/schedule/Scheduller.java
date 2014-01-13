@@ -390,7 +390,7 @@ public class Scheduller {
                             schedullerPackage.serialized = schedullerPackage.object.serialize();
                         }
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        Logger.e(TAG, e);
                         forgetMessage(schedullerPackage.id);
                         continue;
                     }
@@ -461,7 +461,7 @@ public class Scheduller {
             try {
                 return new PreparedPackage(generateSeqNoWeak(), generateMessageId(), ack.serialize(), useHighPriority);
             } catch (IOException e) {
-                e.printStackTrace();
+                Logger.e(TAG, e);
                 return null;
             }
         } else if (foundedPackages.size() == 1 && confirmedMessages.size() == 0) {
@@ -487,7 +487,7 @@ public class Scheduller {
                     Logger.d(TAG, "Adding msg_ack: " + msgIds.length);
                     container.getMessages().add(new MTMessage(generateMessageId(), generateSeqNoWeak(), ack.serialize()));
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    Logger.e(TAG, e);
                 }
             }
             for (SchedullerPackage schedullerPackage : packages) {
@@ -517,7 +517,7 @@ public class Scheduller {
                     try {
                         container.getMessages().add(new MTMessage(schedullerPackage.messageId, schedullerPackage.seqNo, invokeAfter.serialize()));
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        Logger.e(TAG, e);
                         // Never happens
                     }
                 } else {
@@ -539,7 +539,7 @@ public class Scheduller {
                 return new PreparedPackage(containerSeq, containerMessageId, container.serialize(), useHighPriority);
             } catch (IOException e) {
                 // Might not happens
-                e.printStackTrace();
+                Logger.e(TAG, e);
                 return null;
             }
         }

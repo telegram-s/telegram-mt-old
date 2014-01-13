@@ -1,5 +1,7 @@
 package org.telegram.mtproto.transport;
 
+import org.telegram.mtproto.log.Logger;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -17,6 +19,7 @@ import static org.telegram.tl.StreamingUtils.writeByteArray;
  * Time: 5:04
  */
 public class PlainTcpConnection {
+    private static final String TAG = "PlainTcpConnection";
 
     private static final int CONNECTION_TIMEOUT = 5 * 1000;
 
@@ -74,7 +77,7 @@ public class PlainTcpConnection {
         try {
             socket.close();
         } catch (IOException e) {
-            e.printStackTrace();
+            Logger.e(TAG, e);
         }
     }
 
