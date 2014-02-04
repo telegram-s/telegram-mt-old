@@ -2,6 +2,7 @@ package org.telegram.mtproto.transport;
 
 import org.telegram.mtproto.MTProto;
 import org.telegram.mtproto.log.Logger;
+import org.telegram.mtproto.util.BytesCache;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -18,7 +19,6 @@ import java.util.zip.CRC32;
  * Created: 13.08.13 14:56
  */
 public class TcpContext {
-
     private static final int MAX_PACKED_SIZE = 1024 * 1024 * 1024;//1 MB
 
     private class Package {
@@ -159,12 +159,12 @@ public class TcpContext {
         }
     }
 
-    private synchronized void onMessage(byte[] data) {
+    private synchronized void onMessage(byte[] data, int len) {
         if (isClosed) {
             return;
         }
 
-        callback.onRawMessage(data, this);
+        callback.onRawMessage(data, 0, len, this);
     }
 
     private synchronized void onError(int errorCode) {
@@ -225,6 +225,7 @@ public class TcpContext {
                         InputStream stream = socket.getInputStream();
 
                         byte[] pkg = null;
+                        int pkgLen;
                         if (useChecksum) {
                             int length = readInt(stream);
                             if (arrayEq(intToBytes(length), "HTTP".getBytes())) {
@@ -257,12 +258,13 @@ public class TcpContext {
                                 breakContext();
                                 return;
                             }
-                            pkg = readBytes(length - 12, stream);
+                            pkgLen = length - 12;
+                            pkg = readBytes(pkgLen, stream);
                             int readCrc = readInt(stream);
                             CRC32 crc32 = new CRC32();
                             crc32.update(intToBytes(length));
                             crc32.update(intToBytes(packetIndex));
-                            crc32.update(pkg);
+                            crc32.update(pkg, 0, pkgLen);
                             if (readCrc != (int) crc32.getValue()) {
                                 Logger.d(TAG, "Incorrect CRC");
                                 breakContext();
@@ -308,16 +310,21 @@ public class TcpContext {
                                     return;
                                 }
 
+                                pkgLen = len;
                                 pkg = readBytes(len, READ_TIMEOUT, stream);
                             }
                         }
                         try {
-                            onMessage(pkg);
+                            onMessage(pkg, pkgLen);
                         } catch (Throwable t) {
                             Logger.e(TAG, t);
                             Logger.d(TAG, "Message processing error");
                             breakContext();
                             return;
+                        } finally {
+                            if (pkg != null) {
+                                BytesCache.getInstance().put(pkg);
+                            }
                         }
                     } catch (IOException e) {
                         Logger.e(TAG, e);
@@ -518,11 +525,11 @@ public class TcpContext {
     }
 
     private byte[] readBytes(int count, int timeout, InputStream stream) throws IOException {
-        byte[] res = new byte[count];
+        byte[] res = BytesCache.getInstance().allocate(count);
         int offset = 0;
         long start = System.nanoTime();
-        while (offset < res.length) {
-            int readed = stream.read(res, offset, res.length - offset);
+        while (offset < count) {
+            int readed = stream.read(res, offset, count - offset);
             if (readed > 0) {
                 offset += readed;
                 onRead();
@@ -544,10 +551,10 @@ public class TcpContext {
     }
 
     private byte[] readBytes(int count, InputStream stream) throws IOException {
-        byte[] res = new byte[count];
+        byte[] res = BytesCache.getInstance().allocate(count);
         int offset = 0;
-        while (offset < res.length) {
-            int readed = stream.read(res, offset, res.length - offset);
+        while (offset < count) {
+            int readed = stream.read(res, offset, count - offset);
             onRead();
             if (readed > 0) {
                 offset += readed;

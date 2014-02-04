@@ -5,7 +5,7 @@ package org.telegram.mtproto.transport;
  * Created: 13.08.13 15:35
  */
 public interface TcpContextCallback {
-    public void onRawMessage(byte[] data, TcpContext context);
+    public void onRawMessage(byte[] data, int offset, int len, TcpContext context);
 
     public void onError(int errorCode, TcpContext context);
 

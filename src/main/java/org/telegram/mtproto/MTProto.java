@@ -71,6 +71,8 @@ public class MTProto {
     private static final int FUTURE_MINIMAL = 5;
     private static final long FUTURE_TIMEOUT = 30 * 60 * 1000;//30 secs
 
+    private static final boolean USE_CHECKSUM = true;
+
     private final String TAG;
     private final int INSTANCE_INDEX;
 
@@ -494,8 +496,9 @@ public class MTProto {
         return res;
     }
 
-    private MTMessage decrypt(byte[] data) throws IOException {
+    private MTMessage decrypt(byte[] data, int offset, int len) throws IOException {
         ByteArrayInputStream stream = new ByteArrayInputStream(data);
+        stream.skip(offset);
         byte[] msgAuthKey = readBytes(8, stream);
         for (int i = 0; i < authKeyId.length; i++) {
             if (msgAuthKey[i] != authKeyId[i]) {
@@ -513,7 +516,7 @@ public class MTProto {
         byte[] aesKey = concat(substring(sha1_a, 0, 8), substring(sha1_b, 8, 12), substring(sha1_c, 4, 12));
         byte[] aesIv = concat(substring(sha1_a, 8, 12), substring(sha1_b, 0, 8), substring(sha1_c, 16, 4), substring(sha1_d, 0, 8));
 
-        int totalLen = data.length - 8 - 16;
+        int totalLen = len - 8 - 16;
         byte[] encMessage = readBytes(totalLen, stream);
 
         byte[] rawMessage = AES256IGEDecrypt(encMessage, aesIv, aesKey);
@@ -722,7 +725,7 @@ public class MTProto {
 
                 ConnectionType type = connectionRate.tryConnection();
                 try {
-                    TcpContext context = new TcpContext(MTProto.this, type.getHost(), type.getPort(), true, tcpListener);
+                    TcpContext context = new TcpContext(MTProto.this, type.getHost(), type.getPort(), USE_CHECKSUM, tcpListener);
                     if (isClosed) {
                         return;
                     }
@@ -756,12 +759,12 @@ public class MTProto {
     private class TcpListener implements TcpContextCallback {
 
         @Override
-        public void onRawMessage(byte[] data, TcpContext context) {
+        public void onRawMessage(byte[] data, int offset, int len, TcpContext context) {
             if (isClosed) {
                 return;
             }
             try {
-                MTMessage decrypted = decrypt(data);
+                MTMessage decrypted = decrypt(data, offset, len);
                 if (decrypted == null) {
                     Logger.d(TAG, "message ignored");
                     return;
