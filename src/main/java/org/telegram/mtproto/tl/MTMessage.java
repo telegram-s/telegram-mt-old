@@ -19,11 +19,17 @@ public class MTMessage extends TLObject {
     private long messageId;
     private int seqNo;
     private byte[] content;
+    private int contentLen;
 
     public MTMessage(long messageId, int seqNo, byte[] content) {
+        this(messageId, seqNo, content, content.length);
+    }
+
+    public MTMessage(long messageId, int seqNo, byte[] content, int contentLen) {
         this.messageId = messageId;
         this.seqNo = seqNo;
         this.content = content;
+        this.contentLen = contentLen;
     }
 
     public MTMessage() {
@@ -57,6 +63,14 @@ public class MTMessage extends TLObject {
 
     public void setContent(byte[] content) {
         this.content = content;
+    }
+
+    public int getContentLen() {
+        return contentLen;
+    }
+
+    public void setContentLen(int contentLen) {
+        this.contentLen = contentLen;
     }
 
     @Override

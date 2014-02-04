@@ -7,7 +7,6 @@ import org.telegram.mtproto.schedule.PreparedPackage;
 import org.telegram.mtproto.schedule.Scheduller;
 import org.telegram.mtproto.secure.Entropy;
 import org.telegram.mtproto.state.AbsMTProtoState;
-import org.telegram.mtproto.state.ConnectionInfo;
 import org.telegram.mtproto.state.KnownSalt;
 import org.telegram.mtproto.time.TimeOverlord;
 import org.telegram.mtproto.tl.*;
@@ -15,6 +14,7 @@ import org.telegram.mtproto.transport.ConnectionType;
 import org.telegram.mtproto.transport.TcpContext;
 import org.telegram.mtproto.transport.TcpContextCallback;
 import org.telegram.mtproto.transport.TransportRate;
+import org.telegram.mtproto.util.BytesCache;
 import org.telegram.tl.DeserializeException;
 import org.telegram.tl.StreamingUtils;
 import org.telegram.tl.TLMethod;
@@ -23,8 +23,9 @@ import org.telegram.tl.TLObject;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -496,6 +497,24 @@ public class MTProto {
         return res;
     }
 
+    private byte[] optimizedSHA(byte[] serverSalt, byte[] session, long msgId, int seq, int len, byte[] data, int datalen) {
+        try {
+            MessageDigest crypt = MessageDigest.getInstance("SHA-1");
+            crypt.reset();
+            crypt.update(serverSalt);
+            crypt.update(session);
+            crypt.update(longToBytes(msgId));
+            crypt.update(intToBytes(seq));
+            crypt.update(intToBytes(len));
+            crypt.update(data, 0, datalen);
+            return crypt.digest();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
     private MTMessage decrypt(byte[] data, int offset, int len) throws IOException {
         ByteArrayInputStream stream = new ByteArrayInputStream(data);
         stream.skip(offset);
@@ -543,9 +562,10 @@ public class MTProto {
             throw new SecurityException();
         }
 
-        byte[] message = readBytes(msg_len, bodyStream);
+        byte[] message = BytesCache.getInstance().allocate(msg_len);
+        readBytes(message, 0, msg_len, bodyStream);
 
-        byte[] checkHash = SHA1(concat(serverSalt, session, longToBytes(messageId), intToBytes(mes_seq), intToBytes(msg_len), message));
+        byte[] checkHash = optimizedSHA(serverSalt, session, messageId, mes_seq, msg_len, message, msg_len);
 
         if (!arrayEq(substring(checkHash, 4, 16), msgKey)) {
             throw new SecurityException();
@@ -570,7 +590,7 @@ public class MTProto {
             }
         }
 
-        return new MTMessage(messageId, mes_seq, message);
+        return new MTMessage(messageId, mes_seq, message, message.length);
     }
 
     public static int readInt(byte[] src) {
@@ -700,6 +720,7 @@ public class MTProto {
                 }
                 MTMessage message = inQueue.poll();
                 onMTMessage(message);
+                BytesCache.getInstance().put(message.getContent());
             }
         }
     }
@@ -789,6 +810,7 @@ public class MTProto {
                                 inQueue.notifyAll();
                             }
                         }
+                        BytesCache.getInstance().put(decrypted.getContent());
                     } catch (DeserializeException e) {
                         // Ignore this
                         Logger.e(TAG, e);
