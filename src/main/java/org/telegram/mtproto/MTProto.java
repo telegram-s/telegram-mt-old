@@ -546,6 +546,7 @@ public class MTProto {
         } else {
             rawMessage = AES256IGEDecrypt(encMessage, aesIv, aesKey);
         }
+        BytesCache.getInstance().put(encMessage);
 
         ByteArrayInputStream bodyStream = new ByteArrayInputStream(rawMessage);
         byte[] serverSalt = readBytes(8, bodyStream);
@@ -571,6 +572,8 @@ public class MTProto {
 
         byte[] message = BytesCache.getInstance().allocate(msg_len);
         readBytes(message, 0, msg_len, bodyStream);
+
+        BytesCache.getInstance().put(rawMessage);
 
         byte[] checkHash = optimizedSHA(serverSalt, session, messageId, mes_seq, msg_len, message, msg_len);
 
