@@ -1,5 +1,6 @@
 package org.telegram.mtproto.tl;
 
+import org.telegram.mtproto.util.BytesCache;
 import org.telegram.tl.TLContext;
 import org.telegram.tl.TLObject;
 
@@ -21,10 +22,12 @@ public class MTRpcResult extends TLObject {
 
     private long messageId;
     private byte[] content;
+    private int contentLen;
 
-    public MTRpcResult(long messageId, byte[] content) {
+    public MTRpcResult(long messageId, byte[] content, int contentLen) {
         this.messageId = messageId;
         this.content = content;
+        this.contentLen = contentLen;
     }
 
     public MTRpcResult() {
@@ -39,6 +42,10 @@ public class MTRpcResult extends TLObject {
         return content;
     }
 
+    public int getContentLen() {
+        return contentLen;
+    }
+
     @Override
     public int getClassId() {
         return CLASS_ID;
@@ -47,13 +54,15 @@ public class MTRpcResult extends TLObject {
     @Override
     public void serializeBody(OutputStream stream) throws IOException {
         writeLong(messageId, stream);
-        writeByteArray(content, stream);
+        writeByteArray(content, 0, contentLen, stream);
     }
 
     @Override
     public void deserializeBody(InputStream stream, TLContext context) throws IOException {
         messageId = readLong(stream);
-        content = readBytes(stream.available(), stream);
+        int contentSize = stream.available();
+        content = BytesCache.getInstance().allocate(contentSize);
+        readBytes(content, 0, contentSize, stream);
     }
 
     @Override

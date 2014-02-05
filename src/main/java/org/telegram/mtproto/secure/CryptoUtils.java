@@ -38,6 +38,43 @@ public class CryptoUtils {
         return null;
     }
 
+    public static void AES256IGEDecryptBig(byte[] src, byte[] dest, int len, byte[] iv, byte[] key) {
+        AESFastEngine engine = new AESFastEngine();
+        engine.init(false, new KeyParameter(key));
+
+        int blocksCount = len / 16;
+
+        byte[] curIvX = iv;
+        byte[] curIvY = iv;
+        int curIvXOffset = 16;
+        int curIvYOffset = 0;
+
+        for (int i = 0; i < blocksCount; i++) {
+            int offset = i * 16;
+
+            for (int j = 0; j < 16; j++) {
+                dest[offset + j] = (byte) (src[offset + j] ^ curIvX[curIvXOffset + j]);
+            }
+            engine.processBlock(dest, offset, dest, offset);
+            for (int j = 0; j < 16; j++) {
+                dest[offset + j] = (byte) (dest[offset + j] ^ curIvY[curIvYOffset + j]);
+            }
+
+            curIvY = src;
+            curIvYOffset = offset;
+            curIvX = dest;
+            curIvXOffset = offset;
+
+            if (i % 31 == 32) {
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
     public static byte[] AES256IGEDecrypt(byte[] src, byte[] iv, byte[] key) {
         AESFastEngine engine = new AESFastEngine();
         engine.init(false, new KeyParameter(key));

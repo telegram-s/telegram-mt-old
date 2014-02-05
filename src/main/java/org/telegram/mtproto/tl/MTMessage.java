@@ -1,5 +1,6 @@
 package org.telegram.mtproto.tl;
 
+import org.telegram.mtproto.util.BytesCache;
 import org.telegram.tl.TLContext;
 import org.telegram.tl.TLObject;
 
@@ -78,7 +79,7 @@ public class MTMessage extends TLObject {
         writeLong(messageId, stream);
         writeInt(seqNo, stream);
         writeInt(content.length, stream);
-        writeByteArray(content, stream);
+        writeByteArray(content, 0, contentLen, stream);
     }
 
     @Override
@@ -86,7 +87,8 @@ public class MTMessage extends TLObject {
         messageId = readLong(stream);
         seqNo = readInt(stream);
         int size = readInt(stream);
-        content = readBytes(size, stream);
+        content = BytesCache.getInstance().allocate(size);
+        readBytes(content, 0, size, stream);
     }
 
     @Override

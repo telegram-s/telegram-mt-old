@@ -536,9 +536,16 @@ public class MTProto {
         byte[] aesIv = concat(substring(sha1_a, 8, 12), substring(sha1_b, 0, 8), substring(sha1_c, 16, 4), substring(sha1_d, 0, 8));
 
         int totalLen = len - 8 - 16;
-        byte[] encMessage = readBytes(totalLen, stream);
+        byte[] encMessage = BytesCache.getInstance().allocate(totalLen);
+        readBytes(encMessage, 0, totalLen, stream);
 
-        byte[] rawMessage = AES256IGEDecrypt(encMessage, aesIv, aesKey);
+        byte[] rawMessage;
+        if (totalLen > 2 * 1024) {
+            rawMessage = BytesCache.getInstance().allocate(totalLen);
+            AES256IGEDecryptBig(encMessage, rawMessage, totalLen, aesIv, aesKey);
+        } else {
+            rawMessage = AES256IGEDecrypt(encMessage, aesIv, aesKey);
+        }
 
         ByteArrayInputStream bodyStream = new ByteArrayInputStream(rawMessage);
         byte[] serverSalt = readBytes(8, bodyStream);
@@ -548,7 +555,7 @@ public class MTProto {
 
         int msg_len = StreamingUtils.readInt(bodyStream);
 
-        int bodySize = rawMessage.length - 32;
+        int bodySize = totalLen - 32;
 
         if (msg_len % 4 != 0) {
             throw new SecurityException();
