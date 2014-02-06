@@ -539,13 +539,8 @@ public class MTProto {
         byte[] encMessage = BytesCache.getInstance().allocate(totalLen);
         readBytes(encMessage, 0, totalLen, stream);
 
-        byte[] rawMessage;
-        if (totalLen > 2 * 1024) {
-            rawMessage = BytesCache.getInstance().allocate(totalLen);
-            AES256IGEDecryptBig(encMessage, rawMessage, totalLen, aesIv, aesKey);
-        } else {
-            rawMessage = AES256IGEDecrypt(encMessage, aesIv, aesKey);
-        }
+        byte[] rawMessage = BytesCache.getInstance().allocate(totalLen);
+        AES256IGEDecryptBig(encMessage, rawMessage, totalLen, aesIv, aesKey);
         BytesCache.getInstance().put(encMessage);
 
         ByteArrayInputStream bodyStream = new ByteArrayInputStream(rawMessage);
@@ -623,6 +618,7 @@ public class MTProto {
 
         @Override
         public void run() {
+            setPriority(Thread.MIN_PRIORITY);
             PrepareSchedule prepareSchedule = new PrepareSchedule();
             while (!isClosed) {
                 Logger.d(TAG, "Scheduller Iteration");
@@ -714,6 +710,7 @@ public class MTProto {
 
         @Override
         public void run() {
+            setPriority(Thread.MIN_PRIORITY);
             while (!isClosed) {
                 Logger.d(TAG, "Response Iteration");
                 synchronized (inQueue) {
@@ -742,6 +739,7 @@ public class MTProto {
 
         @Override
         public void run() {
+            setPriority(Thread.MIN_PRIORITY);
             while (!isClosed) {
                 Logger.d(TAG, "Connection Fixer Iteration");
                 synchronized (contexts) {

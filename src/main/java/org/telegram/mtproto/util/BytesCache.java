@@ -3,6 +3,7 @@ package org.telegram.mtproto.util;
 import org.telegram.mtproto.log.Logger;
 
 import java.util.HashSet;
+import java.util.concurrent.ConcurrentSkipListSet;
 
 /**
  * Created by ex3ndr on 04.02.14.
@@ -24,7 +25,7 @@ public class BytesCache {
 
     public synchronized void put(byte[] data) {
         byteBuffer.add(data);
-        Logger.d(TAG, "Adding to cache with size " + data.length);
+        Logger.d(TAG, "Adding to cache with size " + data.length + ", cache size " + byteBuffer.size());
     }
 
     public synchronized byte[] allocate(int minSize) {
