@@ -25,7 +25,7 @@ public class BytesCache {
 
     public synchronized void put(byte[] data) {
         byteBuffer.add(data);
-        Logger.d(TAG, "Adding to cache with size " + data.length + ", cache size " + byteBuffer.size());
+        // Logger.d(TAG, "Adding to cache with size " + data.length + ", cache size " + byteBuffer.size());
     }
 
     public synchronized byte[] allocate(int minSize) {
@@ -43,11 +43,11 @@ public class BytesCache {
 
         if (res != null) {
             byteBuffer.remove(res);
-            Logger.d(TAG, "Return cached " + res.length + " with required >=" + minSize);
+            // Logger.d(TAG, "Return cached " + res.length + " with required >=" + minSize);
             return res;
         }
 
-        Logger.d(TAG, "Allocating new " + minSize);
+        // Logger.d(TAG, "Allocating new " + minSize);
 
         return new byte[minSize];
     }
