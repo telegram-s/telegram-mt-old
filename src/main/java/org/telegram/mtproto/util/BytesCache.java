@@ -2,52 +2,95 @@ package org.telegram.mtproto.util;
 
 import org.telegram.mtproto.log.Logger;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 
 /**
  * Created by ex3ndr on 04.02.14.
  */
 public class BytesCache {
-    private static BytesCache instance = new BytesCache("GlobalByteCache");
 
     public static BytesCache getInstance() {
         return instance;
     }
 
+    private static BytesCache instance = new BytesCache("GlobalByteCache");
+
+    private final int[] SIZES = new int[]{64, 128, 3072, 20 * 1024, 40 * 1024};
+    private final int MAX_SIZE = 40 * 1024;
+
+    private HashMap<Integer, HashSet<byte[]>> fastBuffers = new HashMap<Integer, HashSet<byte[]>>();
+    private HashSet<byte[]> mainFilter = new HashSet<byte[]>();
     private HashSet<byte[]> byteBuffer = new HashSet<byte[]>();
+    private WeakHashMap<byte[], StackTraceElement[]> references = new WeakHashMap<byte[], StackTraceElement[]>();
 
     private final String TAG;
 
     public BytesCache(String logTag) {
         TAG = logTag;
+        for (int i = 0; i < SIZES.length; i++) {
+            fastBuffers.put(SIZES[i], new HashSet<byte[]>());
+        }
     }
 
     public synchronized void put(byte[] data) {
-        byteBuffer.add(data);
-        // Logger.d(TAG, "Adding to cache with size " + data.length + ", cache size " + byteBuffer.size());
+        references.remove(data);
+
+        if (mainFilter.add(data)) {
+            for (Integer i : SIZES) {
+                if (data.length == i) {
+                    fastBuffers.get(i).add(data);
+                    return;
+                }
+            }
+            if (data.length <= MAX_SIZE) {
+                return;
+            }
+            byteBuffer.add(data);
+        }
     }
 
     public synchronized byte[] allocate(int minSize) {
-        byte[] res = null;
-        for (byte[] cached : byteBuffer) {
-            if (cached.length < minSize) {
-                continue;
+        if (minSize <= MAX_SIZE) {
+            for (int i = 0; i < SIZES.length; i++) {
+                if (minSize < SIZES[i]) {
+                    if (!fastBuffers.get(SIZES[i]).isEmpty()) {
+                        Iterator<byte[]> interator = fastBuffers.get(SIZES[i]).iterator();
+                        byte[] res = interator.next();
+                        interator.remove();
+
+                        mainFilter.remove(res);
+                        references.put(res, Thread.currentThread().getStackTrace());
+
+                        return res;
+                    }
+
+                    return new byte[SIZES[i]];
+                }
             }
-            if (res == null) {
-                res = cached;
-            } else if (res.length > cached.length) {
-                res = cached;
+        } else {
+            byte[] res = null;
+            for (byte[] cached : byteBuffer) {
+                if (cached.length < minSize) {
+                    continue;
+                }
+                if (res == null) {
+                    res = cached;
+                } else if (res.length > cached.length) {
+                    res = cached;
+                }
+            }
+
+            if (res != null) {
+                byteBuffer.remove(res);
+                mainFilter.remove(res);
+                references.put(res, Thread.currentThread().getStackTrace());
+                return res;
             }
         }
-
-        if (res != null) {
-            byteBuffer.remove(res);
-            // Logger.d(TAG, "Return cached " + res.length + " with required >=" + minSize);
-            return res;
-        }
-
-        // Logger.d(TAG, "Allocating new " + minSize);
 
         return new byte[minSize];
     }

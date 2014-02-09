@@ -341,6 +341,7 @@ public class MTProto {
                 if (responseConstructor == MTRpcError.CLASS_ID) {
                     try {
                         MTRpcError error = (MTRpcError) protoContext.deserializeMessage(result.getContent());
+                        BytesCache.getInstance().put(result.getContent());
 
                         if (error.getErrorCode() == 420) {
                             if (error.getErrorTag().startsWith("FLOOD_WAIT_")) {
@@ -375,10 +376,12 @@ public class MTProto {
                 } else {
                     Logger.d(TAG, "rpc_result: " + result.getMessageId() + " #" + Integer.toHexString(responseConstructor));
                     callback.onRpcResult(id, result.getContent(), this);
+                    BytesCache.getInstance().put(result.getContent());
                     scheduller.forgetMessage(id);
                 }
             } else {
                 Logger.d(TAG, "ignored rpc_result: " + result.getMessageId());
+                BytesCache.getInstance().put(result.getContent());
             }
             scheduller.onMessageConfirmed(result.getMessageId());
             long time = scheduller.getMessageIdGenerationTime(result.getMessageId());
