@@ -248,7 +248,9 @@ public class MTProto {
             scheduller.confirmMessage(mtMessage.getMessageId());
         }
         if (!needProcessing(mtMessage.getMessageId())) {
-            Logger.d(TAG, "Ignoring messages #" + mtMessage.getMessageId());
+            if (Logger.LOG_IGNORED) {
+                Logger.d(TAG, "Ignoring messages #" + mtMessage.getMessageId());
+            }
             return;
         }
         try {
@@ -309,11 +311,15 @@ public class MTProto {
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
                     requestSchedule();
                 } else {
-                    Logger.d(TAG, "Ignored BadMsg #" + badMessage.getErrorCode() + " (" + badMessage.getBadMsgId() + ", " + badMessage.getBadMsqSeqno() + ")");
+                    if (Logger.LOG_IGNORED) {
+                        Logger.d(TAG, "Ignored BadMsg #" + badMessage.getErrorCode() + " (" + badMessage.getBadMsgId() + ", " + badMessage.getBadMsqSeqno() + ")");
+                    }
                     scheduller.forgetMessageByMsgId(badMessage.getBadMsgId());
                 }
             } else {
-                Logger.d(TAG, "Unknown package #" + badMessage.getBadMsgId());
+                if (Logger.LOG_IGNORED) {
+                    Logger.d(TAG, "Unknown package #" + badMessage.getBadMsgId());
+                }
             }
         } else if (object instanceof MTMsgsAck) {
             MTMsgsAck ack = (MTMsgsAck) object;
@@ -380,7 +386,9 @@ public class MTProto {
                     scheduller.forgetMessage(id);
                 }
             } else {
-                Logger.d(TAG, "ignored rpc_result: " + result.getMessageId());
+                if (Logger.LOG_IGNORED) {
+                    Logger.d(TAG, "ignored rpc_result: " + result.getMessageId());
+                }
                 BytesCache.getInstance().put(result.getContent());
             }
             scheduller.onMessageConfirmed(result.getMessageId());
@@ -391,7 +399,9 @@ public class MTProto {
             }
         } else if (object instanceof MTPong) {
             MTPong pong = (MTPong) object;
-            Logger.d(TAG, "pong: " + pong.getPingId());
+            if (Logger.LOG_PING) {
+                Logger.d(TAG, "pong: " + pong.getPingId());
+            }
             scheduller.onMessageConfirmed(pong.getMessageId());
             scheduller.forgetMessageByMsgId(pong.getMessageId());
             long time = scheduller.getMessageIdGenerationTime(pong.getMessageId());
@@ -442,7 +452,9 @@ public class MTProto {
         } else if (object instanceof MTNewSessionCreated) {
             callback.onSessionCreated(this);
         } else {
-            Logger.d(TAG, "Ignored MTProto message " + object.toString());
+            if (Logger.LOG_IGNORED) {
+                Logger.d(TAG, "Ignored MTProto message " + object.toString());
+            }
         }
     }
 
@@ -624,7 +636,9 @@ public class MTProto {
             setPriority(Thread.MIN_PRIORITY);
             PrepareSchedule prepareSchedule = new PrepareSchedule();
             while (!isClosed) {
-                Logger.d(TAG, "Scheduller Iteration");
+                if (Logger.LOG_THREADS) {
+                    Logger.d(TAG, "Scheduller Iteration");
+                }
 
                 int[] contextIds;
                 synchronized (contexts) {
@@ -638,7 +652,9 @@ public class MTProto {
                 synchronized (scheduller) {
                     scheduller.prepareScheduller(prepareSchedule, contextIds);
                     if (prepareSchedule.isDoWait()) {
-                        Logger.d(TAG, "Scheduller:wait " + prepareSchedule.getDelay());
+                        if (Logger.LOG_THREADS) {
+                            Logger.d(TAG, "Scheduller:wait " + prepareSchedule.getDelay());
+                        }
                         try {
                             scheduller.wait(prepareSchedule.getDelay());
                         } catch (InterruptedException e) {
@@ -670,22 +686,31 @@ public class MTProto {
                 }
 
                 if (context == null) {
-                    Logger.d(TAG, "Scheduller: no context");
+                    if (Logger.LOG_THREADS) {
+                        Logger.d(TAG, "Scheduller: no context");
+                    }
                     continue;
                 }
 
-                Logger.d(TAG, "doSchedule");
+                if (Logger.LOG_THREADS) {
+                    Logger.d(TAG, "doSchedule");
+                }
+
                 internalSchedule();
                 synchronized (scheduller) {
                     long start = System.currentTimeMillis();
                     PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId(), initedContext.contains(context.getContextId()));
-                    Logger.d(TAG, "Schedulled in " + (System.currentTimeMillis() - start) + " ms");
+                    if (Logger.LOG_THREADS) {
+                        Logger.d(TAG, "Schedulled in " + (System.currentTimeMillis() - start) + " ms");
+                    }
                     if (preparedPackage == null) {
                         continue;
                     }
 
-                    Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): time:" + getUnixTime(preparedPackage.getMessageId()));
-                    Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): seqNo:" + preparedPackage.getSeqNo() + ", msgId" + preparedPackage.getMessageId());
+                    if (Logger.LOG_THREADS) {
+                        Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): time:" + getUnixTime(preparedPackage.getMessageId()));
+                        Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): seqNo:" + preparedPackage.getSeqNo() + ", msgId" + preparedPackage.getMessageId());
+                    }
 
                     try {
                         EncryptedMessage msg = encrypt(preparedPackage.getSeqNo(), preparedPackage.getMessageId(), preparedPackage.getContent());
@@ -715,7 +740,9 @@ public class MTProto {
         public void run() {
             setPriority(Thread.MIN_PRIORITY);
             while (!isClosed) {
-                Logger.d(TAG, "Response Iteration");
+                if (Logger.LOG_THREADS) {
+                    Logger.d(TAG, "Response Iteration");
+                }
                 synchronized (inQueue) {
                     if (inQueue.isEmpty()) {
                         try {
@@ -744,7 +771,9 @@ public class MTProto {
         public void run() {
             setPriority(Thread.MIN_PRIORITY);
             while (!isClosed) {
-                Logger.d(TAG, "Connection Fixer Iteration");
+                if (Logger.LOG_THREADS) {
+                    Logger.d(TAG, "Connection Fixer Iteration");
+                }
                 synchronized (contexts) {
                     if (contexts.size() >= desiredConnectionCount) {
                         try {

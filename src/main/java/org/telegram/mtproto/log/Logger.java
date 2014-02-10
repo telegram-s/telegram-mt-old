@@ -8,6 +8,10 @@ package org.telegram.mtproto.log;
  */
 public class Logger {
 
+    public static final boolean LOG_THREADS = true;
+    public static final boolean LOG_IGNORED = false;
+    public static final boolean LOG_PING = false;
+
     private static LogInterface logInterface;
 
     public static void registerInterface(LogInterface logInterface) {

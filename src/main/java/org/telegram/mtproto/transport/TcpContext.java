@@ -211,7 +211,9 @@ public class TcpContext {
         public void run() {
             try {
                 while (!isClosed && !isInterrupted()) {
-                    Logger.d(TAG, "Reader Iteration");
+                    if (Logger.LOG_THREADS) {
+                        Logger.d(TAG, "Reader Iteration");
+                    }
                     try {
                         if (socket.isClosed()) {
                             breakContext();
@@ -357,7 +359,9 @@ public class TcpContext {
         @Override
         public void run() {
             while (!isBroken) {
-                Logger.d(TAG, "Writer Iteration");
+                if (Logger.LOG_THREADS) {
+                    Logger.d(TAG, "Writer Iteration");
+                }
                 Package p;
                 synchronized (packages) {
                     p = packages.poll();
@@ -464,7 +468,9 @@ public class TcpContext {
         @Override
         public void run() {
             while (!isBroken) {
-                Logger.d(TAG, "DieThread iteration");
+                if (Logger.LOG_THREADS) {
+                    Logger.d(TAG, "DieThread iteration");
+                }
                 if (lastWriteEvent != 0) {
                     long delta = (System.nanoTime() - lastWriteEvent) / (1000 * 1000);
                     if (delta >= READ_DIE_TIMEOUT) {
@@ -530,6 +536,7 @@ public class TcpContext {
         long start = System.nanoTime();
         while (offset < count) {
             int readed = stream.read(res, offset, count - offset);
+            Thread.yield();
             if (readed > 0) {
                 offset += readed;
                 onRead();
@@ -555,7 +562,7 @@ public class TcpContext {
         int offset = 0;
         while (offset < count) {
             int readed = stream.read(res, offset, count - offset);
-            onRead();
+            Thread.yield();
             if (readed > 0) {
                 offset += readed;
                 onRead();
