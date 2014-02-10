@@ -21,6 +21,7 @@ public class BytesCache {
 
     private final int[] SIZES = new int[]{64, 128, 3072, 20 * 1024, 40 * 1024};
     private final int MAX_SIZE = 40 * 1024;
+    private final boolean TRACK_ALLOCATIONS = false;
 
     private HashMap<Integer, HashSet<byte[]>> fastBuffers = new HashMap<Integer, HashSet<byte[]>>();
     private HashSet<byte[]> mainFilter = new HashSet<byte[]>();
@@ -63,7 +64,10 @@ public class BytesCache {
                         interator.remove();
 
                         mainFilter.remove(res);
-                        references.put(res, Thread.currentThread().getStackTrace());
+
+                        if (TRACK_ALLOCATIONS) {
+                            references.put(res, Thread.currentThread().getStackTrace());
+                        }
 
                         return res;
                     }
@@ -87,7 +91,9 @@ public class BytesCache {
             if (res != null) {
                 byteBuffer.remove(res);
                 mainFilter.remove(res);
-                references.put(res, Thread.currentThread().getStackTrace());
+                if (TRACK_ALLOCATIONS) {
+                    references.put(res, Thread.currentThread().getStackTrace());
+                }
                 return res;
             }
         }
