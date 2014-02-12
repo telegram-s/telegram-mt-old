@@ -15,6 +15,13 @@ import java.security.spec.RSAPublicKeySpec;
  * Created: 18.07.13 3:54
  */
 public class CryptoUtils {
+
+    private static AESImplementation currentImplementation = new DefaultAESImplementation();
+
+    public static void setAESImplementation(AESImplementation implementation) {
+        currentImplementation = implementation;
+    }
+
     public static byte[] RSA(byte[] src, BigInteger key, BigInteger exponent) {
         try {
             KeyFactory keyFactory = KeyFactory.getInstance("RSA");
@@ -39,174 +46,28 @@ public class CryptoUtils {
     }
 
     public static void AES256IGEDecryptBig(byte[] src, byte[] dest, int len, byte[] iv, byte[] key) {
-        AESFastEngine engine = new AESFastEngine();
-        engine.init(false, new KeyParameter(key));
-
-        int blocksCount = len / 16;
-
-        byte[] curIvX = iv;
-        byte[] curIvY = iv;
-        int curIvXOffset = 16;
-        int curIvYOffset = 0;
-
-        for (int i = 0; i < blocksCount; i++) {
-            int offset = i * 16;
-
-            for (int j = 0; j < 16; j++) {
-                dest[offset + j] = (byte) (src[offset + j] ^ curIvX[curIvXOffset + j]);
-            }
-            engine.processBlock(dest, offset, dest, offset);
-            for (int j = 0; j < 16; j++) {
-                dest[offset + j] = (byte) (dest[offset + j] ^ curIvY[curIvYOffset + j]);
-            }
-
-            curIvY = src;
-            curIvYOffset = offset;
-            curIvX = dest;
-            curIvXOffset = offset;
-
-            if (i % 31 == 32) {
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-        }
+        currentImplementation.AES256IGEDecrypt(src, dest, len, iv, key);
     }
 
     public static byte[] AES256IGEDecrypt(byte[] src, byte[] iv, byte[] key) {
-        AESFastEngine engine = new AESFastEngine();
-        engine.init(false, new KeyParameter(key));
-
-        int blocksCount = src.length / 16;
-        byte[] outData = new byte[src.length];
-
-        byte[] curIvX = iv;
-        byte[] curIvY = iv;
-        int curIvXOffset = 16;
-        int curIvYOffset = 0;
-
-        for (int i = 0; i < blocksCount; i++) {
-            int offset = i * 16;
-
-            for (int j = 0; j < 16; j++) {
-                outData[offset + j] = (byte) (src[offset + j] ^ curIvX[curIvXOffset + j]);
-            }
-            engine.processBlock(outData, offset, outData, offset);
-            for (int j = 0; j < 16; j++) {
-                outData[offset + j] = (byte) (outData[offset + j] ^ curIvY[curIvYOffset + j]);
-            }
-
-            curIvY = src;
-            curIvYOffset = offset;
-            curIvX = outData;
-            curIvXOffset = offset;
-        }
-
-        return outData;
+        byte[] res = new byte[src.length];
+        currentImplementation.AES256IGEDecrypt(src, res, src.length, iv, key);
+        return res;
     }
 
     public static void AES256IGEDecrypt(File src, File dest, byte[] iv, byte[] key) throws IOException {
-        AESFastEngine engine = new AESFastEngine();
-        engine.init(false, new KeyParameter(key));
-
-        byte[] curIvX = substring(iv, 16, 16);
-        byte[] curIvY = substring(iv, 0, 16);
-
-        BufferedInputStream inputStream = new BufferedInputStream(new FileInputStream(src));
-        BufferedOutputStream outputStream = new BufferedOutputStream(new FileOutputStream(dest));
-        byte[] buffer = new byte[16];
-        int count;
-        while ((count = inputStream.read(buffer)) > 0) {
-            byte[] outData = new byte[16];
-            for (int j = 0; j < 16; j++) {
-                outData[j] = (byte) (buffer[j] ^ curIvX[j]);
-            }
-            engine.processBlock(outData, 0, outData, 0);
-            for (int j = 0; j < 16; j++) {
-                outData[j] = (byte) (outData[j] ^ curIvY[j]);
-            }
-
-            curIvY = buffer;
-            curIvX = outData;
-            buffer = new byte[16];
-
-            outputStream.write(outData);
-        }
-        outputStream.flush();
-        outputStream.close();
-        inputStream.close();
+        currentImplementation.AES256IGEDecrypt(src.getAbsolutePath(), dest.getAbsolutePath(), iv, key);
     }
 
     public static void AES256IGEEncrypt(File src, File dest, byte[] iv, byte[] key) throws IOException {
-        AESFastEngine engine = new AESFastEngine();
-        engine.init(true, new KeyParameter(key));
-
-        byte[] curIvX = substring(iv, 16, 16);
-        byte[] curIvY = substring(iv, 0, 16);
-
-        BufferedInputStream inputStream = new BufferedInputStream(new FileInputStream(src));
-        BufferedOutputStream outputStream = new BufferedOutputStream(new FileOutputStream(dest));
-        byte[] buffer = new byte[16];
-        int count;
-        while ((count = inputStream.read(buffer)) > 0) {
-            byte[] outData = new byte[16];
-            for (int j = 0; j < 16; j++) {
-                outData[j] = (byte) (buffer[j] ^ curIvY[j]);
-            }
-            engine.processBlock(outData, 0, outData, 0);
-            for (int j = 0; j < 16; j++) {
-                outData[j] = (byte) (outData[j] ^ curIvX[j]);
-            }
-
-            curIvX = buffer;
-            curIvY = outData;
-            buffer = new byte[16];
-
-            outputStream.write(outData);
-        }
-        outputStream.flush();
-        outputStream.close();
-        inputStream.close();
+        currentImplementation.AES256IGEEncrypt(src.getAbsolutePath(), dest.getAbsolutePath(), iv, key);
     }
 
     public static byte[] AES256IGEEncrypt(byte[] src, byte[] iv, byte[] key) {
-        AESFastEngine engine = new AESFastEngine();
-        engine.init(true, new KeyParameter(key));
-
-        int blocksCount = src.length / 16;
-        byte[] outData = new byte[src.length];
-
-        byte[] curIvX = iv;
-        byte[] curIvY = iv;
-        int curIvXOffset = 16;
-        int curIvYOffset = 0;
-
-        for (int i = 0; i < blocksCount; i++) {
-
-            int offset = i * 16;
-
-            for (int j = 0; j < 16; j++) {
-                outData[offset + j] = (byte) (src[offset + j] ^ curIvY[curIvYOffset + j]);
-            }
-            engine.processBlock(outData, offset, outData, offset);
-            for (int j = 0; j < 16; j++) {
-                outData[offset + j] = (byte) (outData[offset + j] ^ curIvX[curIvXOffset + j]);
-            }
-
-            curIvX = src;
-            curIvXOffset = offset;
-            curIvY = outData;
-            curIvYOffset = offset;
-        }
-
-        return outData;
+        byte[] res = new byte[src.length];
+        currentImplementation.AES256IGEEncrypt(src, res, src.length, iv, key);
+        return res;
     }
-
-//    public static String base64(byte[] data) {
-//        return Base64.encodeToString(data, Base64.DEFAULT);
-//    }
 
     public static String MD5(byte[] src) {
         try {
