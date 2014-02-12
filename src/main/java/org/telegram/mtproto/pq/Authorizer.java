@@ -6,7 +6,7 @@ import org.telegram.mtproto.log.Logger;
 import org.telegram.mtproto.secure.CryptoUtils;
 import org.telegram.mtproto.secure.Entropy;
 import org.telegram.mtproto.secure.Keys;
-import org.telegram.mtproto.secure.PrimeUtils;
+import org.telegram.mtproto.secure.pq.PQSolver;
 import org.telegram.mtproto.state.ConnectionInfo;
 import org.telegram.mtproto.time.TimeOverlord;
 import org.telegram.mtproto.tl.pq.*;
@@ -90,7 +90,9 @@ public class Authorizer {
         BigInteger pq = loadBigInt(resPQ.getPq());
         BigInteger p = null;
         try {
-            p = PrimeUtils.findSmallMultiplier(pq);
+            long start = System.currentTimeMillis();
+            p = PQSolver.solvePq(pq);
+            Logger.d(TAG, "Solved PQ in " + (System.currentTimeMillis() - start) + " ms");
         } catch (Exception e) {
             throw new IOException();
         }

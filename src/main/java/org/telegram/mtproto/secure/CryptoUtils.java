@@ -1,5 +1,8 @@
 package org.telegram.mtproto.secure;
 
+import org.telegram.mtproto.secure.aes.AESImplementation;
+import org.telegram.mtproto.secure.aes.DefaultAESImplementation;
+
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;

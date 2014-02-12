@@ -1,4 +1,4 @@
-package org.telegram.mtproto.secure;
+package org.telegram.mtproto.secure.aes;
 
 import java.io.IOException;
 

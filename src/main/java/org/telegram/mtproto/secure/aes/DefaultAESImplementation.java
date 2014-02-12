@@ -1,4 +1,6 @@
-package org.telegram.mtproto.secure;
+package org.telegram.mtproto.secure.aes;
+
+import org.telegram.mtproto.secure.KeyParameter;
 
 import java.io.*;
 
