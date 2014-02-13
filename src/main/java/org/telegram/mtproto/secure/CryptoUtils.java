@@ -126,6 +126,49 @@ public class CryptoUtils {
         return res.toLowerCase();
     }
 
+    public static byte[] SHA1(InputStream in) throws IOException {
+        try {
+            MessageDigest crypt = MessageDigest.getInstance("SHA-1");
+            crypt.reset();
+            // Transfer bytes from in to out
+            byte[] buf = new byte[4 * 1024];
+            int len;
+            while ((len = in.read(buf)) > 0) {
+                Thread.yield();
+                // out.write(buf, 0, len);
+                crypt.update(buf, 0, len);
+            }
+            in.close();
+            return crypt.digest();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
+    public static byte[] SHA1(String fileName) throws IOException {
+        try {
+            MessageDigest crypt = MessageDigest.getInstance("SHA-1");
+            crypt.reset();
+            FileInputStream in = new FileInputStream(fileName);
+            // Transfer bytes from in to out
+            byte[] buf = new byte[4 * 1024];
+            int len;
+            while ((len = in.read(buf)) > 0) {
+                Thread.yield();
+                // out.write(buf, 0, len);
+                crypt.update(buf, 0, len);
+            }
+            in.close();
+            return crypt.digest();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
     public static byte[] SHA1(byte[] src) {
         try {
             MessageDigest crypt = MessageDigest.getInstance("SHA-1");
