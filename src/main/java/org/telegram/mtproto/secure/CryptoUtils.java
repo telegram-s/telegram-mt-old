@@ -19,6 +19,32 @@ import java.security.spec.RSAPublicKeySpec;
  */
 public class CryptoUtils {
 
+    private static final ThreadLocal<MessageDigest> md5 = new ThreadLocal<MessageDigest>() {
+        @Override
+        protected MessageDigest initialValue() {
+            MessageDigest crypt = null;
+            try {
+                crypt = MessageDigest.getInstance("MD5");
+            } catch (NoSuchAlgorithmException e) {
+                e.printStackTrace();
+            }
+            return crypt;
+        }
+    };
+
+    private static final ThreadLocal<MessageDigest> sha1 = new ThreadLocal<MessageDigest>() {
+        @Override
+        protected MessageDigest initialValue() {
+            MessageDigest crypt = null;
+            try {
+                crypt = MessageDigest.getInstance("SHA-1");
+            } catch (NoSuchAlgorithmException e) {
+                e.printStackTrace();
+            }
+            return crypt;
+        }
+    };
+
     private static AESImplementation currentImplementation = new DefaultAESImplementation();
 
     public static void setAESImplementation(AESImplementation implementation) {
@@ -87,7 +113,7 @@ public class CryptoUtils {
 
     public static String MD5(RandomAccessFile randomAccessFile) {
         try {
-            MessageDigest crypt = MessageDigest.getInstance("MD5");
+            MessageDigest crypt = md5.get();
             crypt.reset();
             byte[] block = new byte[8 * 1024];
             for (int i = 0; i < randomAccessFile.length(); i += 8 * 1024) {
@@ -96,8 +122,6 @@ public class CryptoUtils {
                 crypt.update(block, 0, len);
             }
             return ToHex(crypt.digest());
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -106,16 +130,10 @@ public class CryptoUtils {
     }
 
     public static byte[] MD5Raw(byte[] src) {
-        try {
-            MessageDigest crypt = MessageDigest.getInstance("MD5");
-            crypt.reset();
-            crypt.update(src);
-            return crypt.digest();
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        }
-
-        return null;
+        MessageDigest crypt = md5.get();
+        crypt.reset();
+        crypt.update(src);
+        return crypt.digest();
     }
 
     public static String ToHex(byte[] src) {
@@ -127,74 +145,50 @@ public class CryptoUtils {
     }
 
     public static byte[] SHA1(InputStream in) throws IOException {
-        try {
-            MessageDigest crypt = MessageDigest.getInstance("SHA-1");
-            crypt.reset();
-            // Transfer bytes from in to out
-            byte[] buf = new byte[4 * 1024];
-            int len;
-            while ((len = in.read(buf)) > 0) {
-                Thread.yield();
-                // out.write(buf, 0, len);
-                crypt.update(buf, 0, len);
-            }
-            in.close();
-            return crypt.digest();
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
+        MessageDigest crypt = sha1.get();
+        crypt.reset();
+        // Transfer bytes from in to out
+        byte[] buf = new byte[4 * 1024];
+        int len;
+        while ((len = in.read(buf)) > 0) {
+            Thread.yield();
+            // out.write(buf, 0, len);
+            crypt.update(buf, 0, len);
         }
-
-        return null;
+        in.close();
+        return crypt.digest();
     }
 
     public static byte[] SHA1(String fileName) throws IOException {
-        try {
-            MessageDigest crypt = MessageDigest.getInstance("SHA-1");
-            crypt.reset();
-            FileInputStream in = new FileInputStream(fileName);
-            // Transfer bytes from in to out
-            byte[] buf = new byte[4 * 1024];
-            int len;
-            while ((len = in.read(buf)) > 0) {
-                Thread.yield();
-                // out.write(buf, 0, len);
-                crypt.update(buf, 0, len);
-            }
-            in.close();
-            return crypt.digest();
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
+        MessageDigest crypt = sha1.get();
+        crypt.reset();
+        FileInputStream in = new FileInputStream(fileName);
+        // Transfer bytes from in to out
+        byte[] buf = new byte[4 * 1024];
+        int len;
+        while ((len = in.read(buf)) > 0) {
+            Thread.yield();
+            // out.write(buf, 0, len);
+            crypt.update(buf, 0, len);
         }
-
-        return null;
+        in.close();
+        return crypt.digest();
     }
 
     public static byte[] SHA1(byte[] src) {
-        try {
-            MessageDigest crypt = MessageDigest.getInstance("SHA-1");
-            crypt.reset();
-            crypt.update(src);
-            return crypt.digest();
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        }
-
-        return null;
+        MessageDigest crypt = sha1.get();
+        crypt.reset();
+        crypt.update(src);
+        return crypt.digest();
     }
 
     public static byte[] SHA1(byte[]... src1) {
-        try {
-            MessageDigest crypt = MessageDigest.getInstance("SHA-1");
-            crypt.reset();
-            for (int i = 0; i < src1.length; i++) {
-                crypt.update(src1[i]);
-            }
-            return crypt.digest();
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
+        MessageDigest crypt = sha1.get();
+        crypt.reset();
+        for (int i = 0; i < src1.length; i++) {
+            crypt.update(src1[i]);
         }
-
-        return null;
+        return crypt.digest();
     }
 
     public static boolean arrayEq(byte[] a, byte[] b) {
