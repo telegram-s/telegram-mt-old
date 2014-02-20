@@ -898,7 +898,7 @@ public class MTProto {
             Logger.d(TAG, "onChannelBroken (#" + contextId + ")");
             synchronized (contexts) {
                 contexts.remove(context);
-                if (connectedContexts.contains(contextId)) {
+                if (!connectedContexts.contains(contextId)) {
                     if (contextConnectionId.containsKey(contextId)) {
                         exponentalBackoff.onFailureNoWait();
                         connectionRate.onConnectionFailure(contextConnectionId.get(contextId));
