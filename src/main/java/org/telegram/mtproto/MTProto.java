@@ -555,7 +555,9 @@ public class MTProto {
         readBytes(encMessage, 0, totalLen, stream);
 
         byte[] rawMessage = BytesCache.getInstance().allocate(totalLen);
+        long decryptStart = System.currentTimeMillis();
         AES256IGEDecryptBig(encMessage, rawMessage, totalLen, aesIv, aesKey);
+        Logger.d(TAG, "Decrypted in " + (System.currentTimeMillis() - decryptStart) + " ms");
         BytesCache.getInstance().put(encMessage);
 
         ByteArrayInputStream bodyStream = new ByteArrayInputStream(rawMessage);
