@@ -28,8 +28,8 @@ public class Scheduller {
     private final String TAG;//  = "MTProtoScheduller";
 
     // Share identity values across all connections to avoid collisions
-    private static AtomicInteger messagesIds = new AtomicInteger(1);
-    private static HashMap<Long, Long> idGenerationTime = new HashMap<Long, Long>();
+    private static final AtomicInteger messagesIds = new AtomicInteger(1);
+    private static final HashMap<Long, Long> idGenerationTime = new HashMap<Long, Long>();
 
     private static final int SCHEDULLER_TIMEOUT = 15 * 1000;//15 sec
 
