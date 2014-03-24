@@ -72,7 +72,7 @@ public class MTProto {
     private static final int FUTURE_MINIMAL = 5;
     private static final long FUTURE_TIMEOUT = 30 * 60 * 1000;//30 secs
 
-    private static final boolean USE_CHECKSUM = true;
+    private static final boolean USE_CHECKSUM = false;
 
     private final String TAG;
     private final int INSTANCE_INDEX;
