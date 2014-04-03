@@ -13,6 +13,7 @@ import org.telegram.tl.TLObject;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -42,6 +43,7 @@ public class Scheduller {
     private SortedMap<Integer, SchedullerPackage> messages = Collections.synchronizedSortedMap(new TreeMap<Integer, SchedullerPackage>());
     private HashSet<Long> currentMessageGeneration = new HashSet<Long>();
     private HashSet<Long> confirmedMessages = new HashSet<Long>();
+    private CopyOnWriteArrayList<SchedullerListener> schedullerListeners = new CopyOnWriteArrayList<SchedullerListener>();
 
     private long firstConfirmTime = 0;
 
@@ -54,6 +56,21 @@ public class Scheduller {
     public Scheduller(MTProto mtProto, CallWrapper wrapper) {
         TAG = "MTProto#" + mtProto.getInstanceIndex() + "#Scheduller";
         this.wrapper = wrapper;
+    }
+
+    public void addListener(SchedullerListener listener) {
+        schedullerListeners.remove(listener);
+        schedullerListeners.add(listener);
+    }
+
+    public void removeListener(SchedullerListener listener) {
+        schedullerListeners.remove(listener);
+    }
+
+    private void notifyChanged() {
+        for (SchedullerListener listener : schedullerListeners) {
+            listener.onSchedullerUpdated(this);
+        }
     }
 
     private synchronized long generateMessageId() {
@@ -114,6 +131,7 @@ public class Scheduller {
         schedullerPackage.supportTag = object.toString();
         schedullerPackage.serverErrorCount = 0;
         messages.put(id, schedullerPackage);
+        notifyChanged();
         return id;
     }
 
@@ -243,6 +261,7 @@ public class Scheduller {
             schedullerPackage.messageId = 0;
             schedullerPackage.seqNo = 0;
         }
+        notifyChanged();
     }
 
     public boolean isMessageFromCurrentGeneration(long msgId) {
@@ -265,6 +284,7 @@ public class Scheduller {
                 Logger.d(TAG, "Resending as new #" + schedullerPackage.id);
             }
         }
+        notifyChanged();
     }
 
     public void resendMessage(long msgId) {
@@ -275,6 +295,7 @@ public class Scheduller {
                 schedullerPackage.lastAttemptTime = 0;
             }
         }
+        notifyChanged();
     }
 
     public int[] mapFastConfirm(int fastConfirm) {
@@ -514,10 +535,6 @@ public class Scheduller {
         }
     }
 
-    public synchronized void onServerError(long msgId) {
-
-    }
-
     public synchronized void onConnectionDies(int connectionId) {
         Logger.d(TAG, "Connection dies " + connectionId);
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
@@ -545,6 +562,7 @@ public class Scheduller {
 
             }
         }
+        notifyChanged();
     }
 
     private static final int PRIORITY_HIGH = 1;

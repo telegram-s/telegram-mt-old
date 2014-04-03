@@ -1,35 +1,22 @@
 package org.telegram.mtproto;
 
 import org.telegram.actors.*;
-import org.telegram.mtproto.backoff.ExponentalBackoff;
 import org.telegram.mtproto.log.Logger;
-import org.telegram.mtproto.schedule.PrepareSchedule;
-import org.telegram.mtproto.schedule.PreparedPackage;
 import org.telegram.mtproto.schedule.Scheduller;
 import org.telegram.mtproto.secure.Entropy;
 import org.telegram.mtproto.state.AbsMTProtoState;
 import org.telegram.mtproto.state.KnownSalt;
 import org.telegram.mtproto.time.TimeOverlord;
 import org.telegram.mtproto.tl.*;
-import org.telegram.mtproto.transport.ConnectionType;
-import org.telegram.mtproto.transport.TcpContext;
-import org.telegram.mtproto.transport.TcpContextCallback;
-import org.telegram.mtproto.transport.TransportRate;
+import org.telegram.mtproto.transport.*;
 import org.telegram.mtproto.util.BytesCache;
 import org.telegram.tl.DeserializeException;
-import org.telegram.tl.StreamingUtils;
 import org.telegram.tl.TLMethod;
 import org.telegram.tl.TLObject;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.telegram.mtproto.secure.CryptoUtils.*;
@@ -80,79 +67,66 @@ public class MTProto {
 
     private static final int FUTURE_REQUEST_COUNT = 64;
     private static final int FUTURE_MINIMAL = 5;
-    private static final long FUTURE_TIMEOUT = 30 * 60 * 1000;//30 secs
-
-    private static final boolean USE_CHECKSUM = false;
+    private static final long FUTURE_TIMEOUT = 5 * 60 * 60 * 1000;//5 min
+    private static final long FUTURE_NO_TIME_TIMEOUT = 15 * 60 * 1000;//15 sec
 
     private final String TAG;
     private final int INSTANCE_INDEX;
 
     private MTProtoContext protoContext;
-
-    private int desiredConnectionCount;
-    private final HashSet<TcpContext> contexts = new HashSet<TcpContext>();
-    private final HashMap<Integer, Integer> contextConnectionId = new HashMap<Integer, Integer>();
-    private final HashSet<Integer> connectedContexts = new HashSet<Integer>();
-    private final HashSet<Integer> initedContext = new HashSet<Integer>();
-    private TcpContextCallback tcpListener;
-
-    private final Scheduller scheduller;
-    private SchedullerThread schedullerThread;
-
-    private final ConcurrentLinkedQueue<MTMessage> inQueue = new ConcurrentLinkedQueue<MTMessage>();
-    private ResponseProcessor responseProcessor;
-
-    private final ArrayList<Long> receivedMessages = new ArrayList<Long>();
+    private ActorSystem actorSystem;
 
     private byte[] authKey;
     private byte[] authKeyId;
     private byte[] session;
+    private AbsMTProtoState state;
+
+    private int desiredConnectionCount;
+    private TransportPool transportPool;
+
+    private int mode = MODE_GENERAL;
+    private final Scheduller scheduller;
+    private final ArrayList<Long> receivedMessages = new ArrayList<Long>();
+    private ResponseActor.ResponseMessenger responseActor;
+    private MTProtoCallback callback;
+    private InternalActionsActor.Messenger actionsActor;
 
     private boolean isClosed;
 
-    private MTProtoCallback callback;
-
-    private AbsMTProtoState state;
-
-    private long futureSaltsRequestedTime = Long.MIN_VALUE;
-    private long futureSaltsRequestId = -1;
-
-    private int roundRobin = 0;
-
-    private TransportRate connectionRate;
-
-    private long lastPingTime = System.nanoTime() / 1000000L - PING_INTERVAL_REQUEST * 10;
-
-    private ExponentalBackoff exponentalBackoff;
-
-    private ActorSystem actorSystem;
-
-    private int mode = MODE_GENERAL;
-
-    private ConnectorMessenger connectionActor;
-
-    public MTProto(AbsMTProtoState state, MTProtoCallback callback, CallWrapper callWrapper, int connectionsCount) {
+    public MTProto(AbsMTProtoState state, final MTProtoCallback callback, CallWrapper callWrapper, int connectionsCount) {
         this.INSTANCE_INDEX = instanceIndex.incrementAndGet();
         this.TAG = "MTProto#" + INSTANCE_INDEX;
-        this.exponentalBackoff = new ExponentalBackoff(TAG + "#BackOff");
+        this.actorSystem = new ActorSystem();
+        this.actorSystem.addThread("response");
+        this.actorSystem.addThread("connector");
+        this.actorSystem.addThread("scheduller");
         this.state = state;
-        this.connectionRate = new TransportRate(state.getAvailableConnections());
         this.callback = callback;
         this.authKey = state.getAuthKey();
         this.authKeyId = substring(SHA1(authKey), 12, 8);
-        this.protoContext = new MTProtoContext();
+        this.protoContext = MTProtoContext.getInstance();
         this.desiredConnectionCount = connectionsCount;
         this.session = Entropy.generateSeed(8);
-        this.tcpListener = new TcpListener();
         this.scheduller = new Scheduller(this, callWrapper);
-        this.schedullerThread = new SchedullerThread();
-        this.schedullerThread.start();
-        this.responseProcessor = new ResponseProcessor();
-        this.responseProcessor.start();
-        this.actorSystem = new ActorSystem();
-        this.actorSystem.addThread("connector");
-        this.connectionActor = new ConnectorMessenger(new ConnectionActor(actorSystem).self(), null);
-        this.connectionActor.check();
+        this.responseActor = new ResponseActor(actorSystem).messenger();
+        this.actionsActor = new InternalActionsActor(actorSystem).messenger();
+        this.transportPool = new TransportTcpPool(this, new TransportPoolCallback() {
+            @Override
+            public void onMTMessage(MTMessage message) {
+                responseActor.onMessage(message);
+            }
+
+            @Override
+            public void onFastConfirm(int hash) {
+                // We might not send this to response actor for providing faster confirmation
+                int[] ids = scheduller.mapFastConfirm(hash);
+                for (int id : ids) {
+                    callback.onConfirmed(id);
+                }
+            }
+        }, desiredConnectionCount);
+        this.actionsActor.ping();
+        this.actionsActor.requestSalts();
     }
 
     public AbsMTProtoState getState() {
@@ -160,23 +134,35 @@ public class MTProto {
     }
 
     public void resetNetworkBackoff() {
-        this.exponentalBackoff.reset();
+        // this.exponentalBackoff.reset();
     }
 
     public void reloadConnectionInformation() {
-        this.connectionRate = new TransportRate(state.getAvailableConnections());
+        // this.connectionRate = new TransportRate(state.getAvailableConnections());
     }
 
     public int getInstanceIndex() {
         return INSTANCE_INDEX;
     }
 
-    /* package */ Scheduller getScheduller() {
+    public Scheduller getScheduller() {
         return scheduller;
     }
 
-    /* package */ int getDesiredConnectionCount() {
-        return desiredConnectionCount;
+    public byte[] getSession() {
+        return session;
+    }
+
+    public byte[] getAuthKeyId() {
+        return authKeyId;
+    }
+
+    public byte[] getAuthKey() {
+        return authKey;
+    }
+
+    public ActorSystem getActorSystem() {
+        return actorSystem;
     }
 
     @Override
@@ -187,15 +173,6 @@ public class MTProto {
     public void close() {
         if (!isClosed) {
             this.isClosed = true;
-//            if (this.connectionFixerThread != null) {
-//                this.connectionFixerThread.interrupt();
-//            }
-            if (this.schedullerThread != null) {
-                this.schedullerThread.interrupt();
-            }
-            if (this.responseProcessor != null) {
-                this.responseProcessor.interrupt();
-            }
             closeConnections();
         }
     }
@@ -205,14 +182,14 @@ public class MTProto {
     }
 
     public void closeConnections() {
-        synchronized (contexts) {
-            for (TcpContext context : contexts) {
-                context.close();
-                scheduller.onConnectionDies(context.getContextId());
-            }
-            contexts.clear();
-            connectionActor.check();
-        }
+//        synchronized (contexts) {
+//            for (TcpContext context : contexts) {
+//                context.close();
+//                scheduller.onConnectionDies(context.getContextId());
+//            }
+//            contexts.clear();
+//            connectionActor.check();
+//        }
     }
 
     private boolean needProcessing(long messageId) {
@@ -255,24 +232,11 @@ public class MTProto {
     public int sendMessage(TLObject request, long timeout, boolean isRpc, boolean highPriority) {
         int id = scheduller.postMessage(request, isRpc, timeout, highPriority);
         Logger.d(TAG, "sendMessage #" + id + " " + request.toString());
-        synchronized (scheduller) {
-            scheduller.notifyAll();
-        }
-
         return id;
     }
 
+    // Finding message type
     private void onMTMessage(MTMessage mtMessage) {
-        if (futureSaltsRequestedTime - System.nanoTime() > FUTURE_TIMEOUT * 1000L) {
-            Logger.d(TAG, "Salt check timeout");
-            int count = state.maximumCachedSalts(getUnixTime(mtMessage.getMessageId()));
-            if (count < FUTURE_MINIMAL) {
-                Logger.d(TAG, "Too fiew actual salts: " + count + ", requesting news");
-                futureSaltsRequestId = scheduller.postMessage(new MTGetFutureSalts(FUTURE_REQUEST_COUNT), false, FUTURE_TIMEOUT);
-                futureSaltsRequestedTime = System.nanoTime();
-            }
-        }
-
         if (mtMessage.getSeqNo() % 2 == 1) {
             scheduller.confirmMessage(mtMessage.getMessageId());
         }
@@ -314,7 +278,6 @@ public class MTProto {
                         scheduller.resetMessageId();
                     }
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
-                    requestSchedule();
                 } else if (badMessage.getErrorCode() == ERROR_SEQ_NO_TOO_BIG || badMessage.getErrorCode() == ERROR_SEQ_NO_TOO_SMALL) {
                     if (scheduller.isMessageFromCurrentGeneration(badMessage.getBadMsgId())) {
                         Logger.d(TAG, "Resetting session");
@@ -322,7 +285,6 @@ public class MTProto {
                         scheduller.resetSession();
                     }
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
-                    requestSchedule();
                 } else if (badMessage.getErrorCode() == ERROR_BAD_SERVER_SALT) {
                     long salt = ((MTBadServerSalt) badMessage).getNewSalt();
                     // Sync time
@@ -331,14 +293,12 @@ public class MTProto {
                     state.badServerSalt(salt);
                     Logger.d(TAG, "Reschedule messages because bad_server_salt #" + badMessage.getBadMsgId());
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
-                    requestSchedule();
+                    actionsActor.requestSalts();
                 } else if (badMessage.getErrorCode() == ERROR_BAD_CONTAINER ||
                         badMessage.getErrorCode() == ERROR_CONTAINER_MSG_ID_INCORRECT) {
                     scheduller.resendMessage(badMessage.getBadMsgId());
-                    requestSchedule();
                 } else if (badMessage.getErrorCode() == ERROR_TOO_OLD) {
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
-                    requestSchedule();
                 } else {
                     if (Logger.LOG_IGNORED) {
                         Logger.d(TAG, "Ignored BadMsg #" + badMessage.getErrorCode() + " (" + badMessage.getBadMsgId() + ", " + badMessage.getBadMsqSeqno() + ")");
@@ -384,7 +344,6 @@ public class MTProto {
                                 int delay = Integer.parseInt(error.getErrorTag().substring("FLOOD_WAIT_".length()));
                                 if (delay <= MAX_INTERNAL_FLOOD_WAIT) {
                                     scheduller.resendAsNewMessageDelayed(result.getMessageId(), delay * 1000);
-                                    requestSchedule();
                                     return;
                                 }
                             }
@@ -487,297 +446,71 @@ public class MTProto {
         }
     }
 
-    private void internalSchedule() {
-        long time = System.nanoTime() / 1000000;
-        if (mode == MODE_GENERAL) {
-            if (time - lastPingTime > PING_INTERVAL_REQUEST) {
-                lastPingTime = time;
-                synchronized (contexts) {
-                    for (TcpContext context : contexts) {
-                        scheduller.postMessageDelayed(
-                                new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL),
-                                false, PING_INTERVAL_REQUEST, 0, context.getContextId(), false);
-                    }
-                }
-            }
-        }
-    }
+    private class InternalActionsActor extends ReflectedActor {
 
-    public void requestSchedule() {
-        synchronized (scheduller) {
-            scheduller.notifyAll();
-        }
-    }
-
-    private EncryptedMessage encrypt(int seqNo, long messageId, byte[] content) throws IOException {
-        long salt = state.findActualSalt((int) (TimeOverlord.getInstance().getServerTime() / 1000));
-        ByteArrayOutputStream messageBody = new ByteArrayOutputStream();
-        writeLong(salt, messageBody);
-        writeByteArray(session, messageBody);
-        writeLong(messageId, messageBody);
-        writeInt(seqNo, messageBody);
-        writeInt(content.length, messageBody);
-        writeByteArray(content, messageBody);
-
-        byte[] innerData = messageBody.toByteArray();
-        byte[] msgKey = substring(SHA1(innerData), 4, 16);
-        int fastConfirm = readInt(SHA1(innerData)) | (1 << 31);
-
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        writeByteArray(authKeyId, out);
-        writeByteArray(msgKey, out);
-
-        byte[] sha1_a = SHA1(msgKey, substring(authKey, 0, 32));
-        byte[] sha1_b = SHA1(substring(authKey, 32, 16), msgKey, substring(authKey, 48, 16));
-        byte[] sha1_c = SHA1(substring(authKey, 64, 32), msgKey);
-        byte[] sha1_d = SHA1(msgKey, substring(authKey, 96, 32));
-
-        byte[] aesKey = concat(substring(sha1_a, 0, 8), substring(sha1_b, 8, 12), substring(sha1_c, 4, 12));
-        byte[] aesIv = concat(substring(sha1_a, 8, 12), substring(sha1_b, 0, 8), substring(sha1_c, 16, 4), substring(sha1_d, 0, 8));
-
-        byte[] encoded = AES256IGEEncrypt(align(innerData, 16), aesIv, aesKey);
-        writeByteArray(encoded, out);
-        EncryptedMessage res = new EncryptedMessage();
-        res.data = out.toByteArray();
-        res.fastConfirm = fastConfirm;
-        return res;
-    }
-
-    private byte[] optimizedSHA(byte[] serverSalt, byte[] session, long msgId, int seq, int len, byte[] data, int datalen) {
-        try {
-            MessageDigest crypt = MessageDigest.getInstance("SHA-1");
-            crypt.reset();
-            crypt.update(serverSalt);
-            crypt.update(session);
-            crypt.update(longToBytes(msgId));
-            crypt.update(intToBytes(seq));
-            crypt.update(intToBytes(len));
-            crypt.update(data, 0, datalen);
-            return crypt.digest();
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
+        public InternalActionsActor(ActorSystem system) {
+            super(system, "internal_actions", "scheduller");
         }
 
-        return null;
-    }
-
-    private MTMessage decrypt(byte[] data, int offset, int len) throws IOException {
-        ByteArrayInputStream stream = new ByteArrayInputStream(data);
-        stream.skip(offset);
-        byte[] msgAuthKey = readBytes(8, stream);
-        for (int i = 0; i < authKeyId.length; i++) {
-            if (msgAuthKey[i] != authKeyId[i]) {
-                Logger.w(TAG, "Unsupported msgAuthKey");
-                throw new SecurityException();
-            }
-        }
-        byte[] msgKey = readBytes(16, stream);
-
-        byte[] sha1_a = SHA1(msgKey, substring(authKey, 8, 32));
-        byte[] sha1_b = SHA1(substring(authKey, 40, 16), msgKey, substring(authKey, 56, 16));
-        byte[] sha1_c = SHA1(substring(authKey, 72, 32), msgKey);
-        byte[] sha1_d = SHA1(msgKey, substring(authKey, 104, 32));
-
-        byte[] aesKey = concat(substring(sha1_a, 0, 8), substring(sha1_b, 8, 12), substring(sha1_c, 4, 12));
-        byte[] aesIv = concat(substring(sha1_a, 8, 12), substring(sha1_b, 0, 8), substring(sha1_c, 16, 4), substring(sha1_d, 0, 8));
-
-        int totalLen = len - 8 - 16;
-        byte[] encMessage = BytesCache.getInstance().allocate(totalLen);
-        readBytes(encMessage, 0, totalLen, stream);
-
-        byte[] rawMessage = BytesCache.getInstance().allocate(totalLen);
-        long decryptStart = System.currentTimeMillis();
-        AES256IGEDecryptBig(encMessage, rawMessage, totalLen, aesIv, aesKey);
-        Logger.d(TAG, "Decrypted in " + (System.currentTimeMillis() - decryptStart) + " ms");
-        BytesCache.getInstance().put(encMessage);
-
-        ByteArrayInputStream bodyStream = new ByteArrayInputStream(rawMessage);
-        byte[] serverSalt = readBytes(8, bodyStream);
-        byte[] session = readBytes(8, bodyStream);
-        long messageId = readLong(bodyStream);
-        int mes_seq = StreamingUtils.readInt(bodyStream);
-
-        int msg_len = StreamingUtils.readInt(bodyStream);
-
-        int bodySize = totalLen - 32;
-
-        if (msg_len % 4 != 0) {
-            throw new SecurityException();
-        }
-
-        if (msg_len > bodySize) {
-            throw new SecurityException();
-        }
-
-        if (msg_len - bodySize > 15) {
-            throw new SecurityException();
-        }
-
-        byte[] message = BytesCache.getInstance().allocate(msg_len);
-        readBytes(message, 0, msg_len, bodyStream);
-
-        BytesCache.getInstance().put(rawMessage);
-
-        byte[] checkHash = optimizedSHA(serverSalt, session, messageId, mes_seq, msg_len, message, msg_len);
-
-        if (!arrayEq(substring(checkHash, 4, 16), msgKey)) {
-            throw new SecurityException();
-        }
-
-        if (!arrayEq(session, this.session)) {
-            return null;
-        }
-
-        if (TimeOverlord.getInstance().getTimeAccuracy() < 10) {
-            long time = (messageId >> 32);
-            long serverTime = TimeOverlord.getInstance().getServerTime();
-
-            if (serverTime + 30 < time) {
-                Logger.w(TAG, "Incorrect message time: " + time + " with server time: " + serverTime);
-                // return null;
-            }
-
-            if (time < serverTime - 300) {
-                Logger.w(TAG, "Incorrect message time: " + time + " with server time: " + serverTime);
-                // return null;
-            }
-        }
-
-        return new MTMessage(messageId, mes_seq, message, message.length);
-    }
-
-    private class SchedullerThread extends Thread {
-        private SchedullerThread() {
-            setName("Scheduller#" + hashCode());
+        public Messenger messenger() {
+            return new Messenger(self());
         }
 
         @Override
-        public void run() {
-            setPriority(Thread.MIN_PRIORITY);
-            PrepareSchedule prepareSchedule = new PrepareSchedule();
-            while (!isClosed) {
-                if (Logger.LOG_THREADS) {
-                    Logger.d(TAG, "Scheduller Iteration");
-                }
+        protected void registerMethods() {
+            registerMethod("requestSalts")
+                    .enableSingleShot();
+            registerMethod("pingDelay")
+                    .enableSingleShot();
+        }
 
-                int[] contextIds;
-                synchronized (contexts) {
-                    TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
-                    contextIds = new int[currentContexts.length];
-                    for (int i = 0; i < contextIds.length; i++) {
-                        contextIds[i] = currentContexts[i].getContextId();
-                    }
-                }
-
-                synchronized (scheduller) {
-                    scheduller.prepareScheduller(prepareSchedule, contextIds);
-                    if (prepareSchedule.isDoWait()) {
-                        if (Logger.LOG_THREADS) {
-                            Logger.d(TAG, "Scheduller:wait " + prepareSchedule.getDelay());
-                        }
-                        try {
-                            scheduller.wait(prepareSchedule.getDelay());
-                        } catch (InterruptedException e) {
-                            Logger.e(TAG, e);
-                            return;
-                        }
-                        continue;
-                    }
-                }
-
-                TcpContext context = null;
-                synchronized (contexts) {
-                    TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
-                    outer:
-                    for (int i = 0; i < currentContexts.length; i++) {
-                        int index = (i + roundRobin + 1) % currentContexts.length;
-                        for (int allowed : prepareSchedule.getAllowedContexts()) {
-                            if (currentContexts[index].getContextId() == allowed) {
-                                context = currentContexts[index];
-                                break outer;
-                            }
-                        }
-
-                    }
-
-                    if (currentContexts.length != 0) {
-                        roundRobin = (roundRobin + 1) % currentContexts.length;
-                    }
-                }
-
-                if (context == null) {
-                    if (Logger.LOG_THREADS) {
-                        Logger.d(TAG, "Scheduller: no context");
-                    }
-                    continue;
-                }
-
-                if (Logger.LOG_THREADS) {
-                    Logger.d(TAG, "doSchedule");
-                }
-
-                internalSchedule();
-                synchronized (scheduller) {
-                    long start = System.currentTimeMillis();
-                    PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId(), initedContext.contains(context.getContextId()));
-                    if (Logger.LOG_THREADS) {
-                        Logger.d(TAG, "Schedulled in " + (System.currentTimeMillis() - start) + " ms");
-                    }
-                    if (preparedPackage == null) {
-                        continue;
-                    }
-
-                    if (Logger.LOG_THREADS) {
-                        Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): time:" + getUnixTime(preparedPackage.getMessageId()));
-                        Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): seqNo:" + preparedPackage.getSeqNo() + ", msgId" + preparedPackage.getMessageId());
-                    }
-
-                    try {
-                        EncryptedMessage msg = encrypt(preparedPackage.getSeqNo(), preparedPackage.getMessageId(), preparedPackage.getContent());
-                        if (preparedPackage.isHighPriority()) {
-                            scheduller.registerFastConfirm(preparedPackage.getMessageId(), msg.fastConfirm);
-                        }
-                        if (!context.isClosed()) {
-                            context.postMessage(msg.data, preparedPackage.isHighPriority());
-                            initedContext.add(context.getContextId());
-                        } else {
-                            scheduller.onConnectionDies(context.getContextId());
-                        }
-                    } catch (IOException e) {
-                        Logger.e(TAG, e);
-                    }
-                }
+        public void onRequestSaltsMessage() {
+            Logger.d(TAG, "Salt check timeout");
+            if (TimeOverlord.getInstance().getTimeAccuracy() > 1000) {
+                Logger.d(TAG, "Time is not accurate");
+                messenger().requestSaltsDelayed(FUTURE_NO_TIME_TIMEOUT);
+                return;
             }
+            int count = state.maximumCachedSalts((int) (TimeOverlord.getInstance().getServerTime() / 1000));
+            if (count < FUTURE_MINIMAL) {
+                Logger.d(TAG, "Too few actual salts: " + count + ", requesting news");
+                scheduller.postMessage(new MTGetFutureSalts(FUTURE_REQUEST_COUNT), false, FUTURE_TIMEOUT);
+            }
+            messenger().requestSaltsDelayed(FUTURE_TIMEOUT);
         }
-    }
 
-    private class ResponseProcessor extends Thread {
-        public ResponseProcessor() {
-            setName("ResponseProcessor#" + hashCode());
+        public void onPingDelayMessage() {
+            Logger.d(TAG, "Ping delay disconnect");
+            scheduller.postMessage(new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL),
+                    false, PING_INTERVAL_REQUEST);
+            messenger().pingDelayed(PING_INTERVAL_REQUEST);
         }
 
-        @Override
-        public void run() {
-            setPriority(Thread.MIN_PRIORITY);
-            while (!isClosed) {
-                if (Logger.LOG_THREADS) {
-                    Logger.d(TAG, "Response Iteration");
-                }
-                synchronized (inQueue) {
-                    if (inQueue.isEmpty()) {
-                        try {
-                            inQueue.wait();
-                        } catch (InterruptedException e) {
-                            return;
-                        }
-                    }
-                    if (inQueue.isEmpty()) {
-                        continue;
-                    }
-                }
-                MTMessage message = inQueue.poll();
-                onMTMessage(message);
-                BytesCache.getInstance().put(message.getContent());
+        private class Messenger extends ActorMessenger {
+
+            protected Messenger(ActorReference reference) {
+                super(reference, null);
+            }
+
+            public void ping() {
+                talkRaw("pingDelay");
+            }
+
+            public void pingDelayed(long delayed) {
+                talkRawDelayed("pingDelay", delayed);
+            }
+
+            public void requestSalts() {
+                talkRaw("requestSalts");
+            }
+
+            public void requestSaltsDelayed(long delay) {
+                talkRaw("requestSalts", delay);
+            }
+
+            @Override
+            public ActorMessenger cloneForSender(ActorReference sender) {
+                return null;
             }
         }
     }
@@ -788,209 +521,29 @@ public class MTProto {
             super(system, "response", "response");
         }
 
-        protected void onNewMessage(MTMessage message) {
+        public void onNewMessage(MTMessage message) {
             onMTMessage(message);
             BytesCache.getInstance().put(message.getContent());
         }
 
-        protected void onRawMessage(byte[] data, int offset, int len, int contextId) {
-
-        }
-    }
-
-    private class ResponseMessenger extends ActorMessenger {
-
-        protected ResponseMessenger(ActorReference reference) {
-            super(reference, null);
+        public ResponseMessenger messenger() {
+            return new ResponseMessenger(self());
         }
 
-        protected ResponseMessenger(ActorReference reference, ActorReference sender) {
-            super(reference, sender);
-        }
+        private class ResponseMessenger extends ActorMessenger {
 
-        public void onMessage(MTMessage message) {
-            talkRaw("new", message);
-        }
-
-        public void onRawMessage(byte[] data, int offset, int len, int contextId) {
-            talkRaw("raw", data, offset, len, contextId);
-        }
-
-        @Override
-        public ActorMessenger cloneForSender(ActorReference sender) {
-            return new ResponseMessenger(reference, sender);
-        }
-    }
-
-    private class ConnectionActor extends ReflectedActor {
-
-        private ConnectionActor(ActorSystem system) {
-            super(system, "connector", "connector");
-        }
-
-        @Override
-        protected void registerMethods() {
-            registerMethod("check")
-                    .enabledBackOff()
-                    .enableSingleShot();
-        }
-
-        protected void onCheckMessage() throws Exception {
-            synchronized (contexts) {
-                if (contexts.size() >= desiredConnectionCount) {
-                    return;
-                }
+            protected ResponseMessenger(ActorReference reference) {
+                super(reference, null);
             }
 
-            ConnectionType type = connectionRate.tryConnection();
-            try {
-                TcpContext context = new TcpContext(MTProto.this, type.getHost(), type.getPort(), USE_CHECKSUM, tcpListener);
-                if (isClosed) {
-                    return;
-                }
-                scheduller.postMessageDelayed(new MTPing(Entropy.generateRandomId()), false, PING_TIMEOUT, 0, context.getContextId(), false);
-                synchronized (contexts) {
-                    contexts.add(context);
-                    contextConnectionId.put(context.getContextId(), type.getId());
-                }
-                synchronized (scheduller) {
-                    scheduller.notifyAll();
-                }
-            } catch (IOException e) {
-                Logger.e(TAG, e);
-                connectionRate.onConnectionFailure(type.getId());
-                throw e;
+            public void onMessage(MTMessage message) {
+                talkRaw("new", message);
             }
 
-            self().talk("check", null);
-        }
-    }
-
-    private class ConnectorMessenger extends ActorMessenger {
-
-        private ConnectorMessenger(ActorReference reference) {
-            super(reference, null);
-        }
-
-        private ConnectorMessenger(ActorReference reference, ActorReference sender) {
-            super(reference, sender);
-        }
-
-        public void check() {
-            talkRaw("check");
-        }
-
-        @Override
-        public ActorMessenger cloneForSender(ActorReference sender) {
-            return new ConnectorMessenger(reference, sender);
-        }
-    }
-
-    private class TcpListener implements TcpContextCallback {
-
-        @Override
-        public void onRawMessage(byte[] data, int offset, int len, TcpContext context) {
-            if (isClosed) {
-                return;
-            }
-            try {
-                MTMessage decrypted = decrypt(data, offset, len);
-                if (decrypted == null) {
-                    Logger.d(TAG, "message ignored");
-                    return;
-                }
-                if (!connectedContexts.contains(context.getContextId())) {
-                    connectedContexts.add(context.getContextId());
-                    exponentalBackoff.onSuccess();
-                    connectionRate.onConnectionSuccess(contextConnectionId.get(context.getContextId()));
-                }
-
-                Logger.d(TAG, "MessageArrived (#" + context.getContextId() + "): time: " + getUnixTime(decrypted.getMessageId()));
-                Logger.d(TAG, "MessageArrived (#" + context.getContextId() + "): seqNo: " + decrypted.getSeqNo() + ", msgId:" + decrypted.getMessageId());
-
-                if (readInt(decrypted.getContent()) == MTMessagesContainer.CLASS_ID) {
-                    try {
-                        TLObject object = protoContext.deserializeMessage(new ByteArrayInputStream(decrypted.getContent()));
-                        if (object instanceof MTMessagesContainer) {
-                            for (MTMessage mtMessage : ((MTMessagesContainer) object).getMessages()) {
-                                inQueue.add(mtMessage);
-                            }
-                            synchronized (inQueue) {
-                                inQueue.notifyAll();
-                            }
-                        }
-                        BytesCache.getInstance().put(decrypted.getContent());
-                    } catch (DeserializeException e) {
-                        // Ignore this
-                        Logger.e(TAG, e);
-                    }
-                } else {
-                    inQueue.add(decrypted);
-                    synchronized (inQueue) {
-                        inQueue.notifyAll();
-                    }
-                }
-            } catch (IOException e) {
-                Logger.e(TAG, e);
-                synchronized (contexts) {
-                    context.close();
-                    if (!connectedContexts.contains(context.getContextId())) {
-                        exponentalBackoff.onFailureNoWait();
-                        connectionRate.onConnectionFailure(contextConnectionId.get(context.getContextId()));
-                    }
-                    contexts.remove(context);
-                    connectionActor.check();
-                    scheduller.onConnectionDies(context.getContextId());
-                }
+            @Override
+            public ActorMessenger cloneForSender(ActorReference sender) {
+                return new ResponseMessenger(reference);
             }
         }
-
-        @Override
-        public void onError(int errorCode, TcpContext context) {
-            if (isClosed) {
-                return;
-            }
-
-            Logger.d(TAG, "OnError (#" + context.getContextId() + "): " + errorCode);
-
-            // Fully maintained at transport level: TcpContext dies
-        }
-
-        @Override
-        public void onChannelBroken(TcpContext context) {
-            if (isClosed) {
-                return;
-            }
-            int contextId = context.getContextId();
-            Logger.d(TAG, "onChannelBroken (#" + contextId + ")");
-            synchronized (contexts) {
-                contexts.remove(context);
-                if (!connectedContexts.contains(contextId)) {
-                    if (contextConnectionId.containsKey(contextId)) {
-                        exponentalBackoff.onFailureNoWait();
-                        connectionRate.onConnectionFailure(contextConnectionId.get(contextId));
-                    }
-                }
-                connectionActor.check();
-            }
-            scheduller.onConnectionDies(context.getContextId());
-            requestSchedule();
-        }
-
-        @Override
-        public void onFastConfirm(int hash) {
-            if (isClosed) {
-                return;
-            }
-            int[] ids = scheduller.mapFastConfirm(hash);
-            for (int id : ids) {
-                callback.onConfirmed(id);
-            }
-        }
-    }
-
-    private class EncryptedMessage {
-        public byte[] data;
-        public int fastConfirm;
     }
 }

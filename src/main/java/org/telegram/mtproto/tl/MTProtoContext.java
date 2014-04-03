@@ -9,6 +9,20 @@ import org.telegram.tl.TLContext;
  * Time: 8:22
  */
 public class MTProtoContext extends TLContext {
+
+    // High performance singleton
+    private static class ContextHolder {
+        public static final MTProtoContext HOLDER_INSTANCE = new MTProtoContext();
+    }
+
+    public static MTProtoContext getInstance() {
+        return ContextHolder.HOLDER_INSTANCE;
+    }
+
+    private MTProtoContext() {
+
+    }
+
     @Override
     protected void init() {
         registerClass(MTPing.CLASS_ID, MTPing.class);
