@@ -45,12 +45,11 @@ public class TransportTcpPool extends TransportPool {
     private TcpListener tcpListener;
 
     private ConnectionActor.ConnectorMessenger connectionActor;
+    private SchedullerActor.Messenger scheduleActor;
 
     private int roundRobin = 0;
 
     private ExponentalBackoff exponentalBackoff;
-
-    private SchedullerThread schedullerThread;
 
     public TransportTcpPool(MTProto proto, TransportPoolCallback callback, int connectionCount) {
         super(proto, callback);
@@ -60,16 +59,24 @@ public class TransportTcpPool extends TransportPool {
         this.tcpListener = new TcpListener();
         this.connectionActor = new ConnectionActor(actorSystem).messenger();
         this.connectionRate = new TransportRate(proto.getState().getAvailableConnections());
-        this.schedullerThread = new SchedullerThread();
-        this.schedullerThread.start();
+        this.scheduleActor = new SchedullerActor(actorSystem).messenger();
         this.connectionActor.check();
+        this.scheduleActor.schedule();
     }
 
     @Override
     public void onSchedullerUpdated(Scheduller scheduller) {
-        synchronized (scheduller) {
-            scheduller.notifyAll();
-        }
+        scheduleActor.schedule();
+    }
+
+    @Override
+    public void reloadConnectionInformation() {
+        this.connectionRate = new TransportRate(proto.getState().getAvailableConnections());
+    }
+
+    @Override
+    public void resetConnectionBackoff() {
+        exponentalBackoff.reset();
     }
 
     private class ConnectionActor extends ReflectedActor {
@@ -139,115 +146,122 @@ public class TransportTcpPool extends TransportPool {
 
     private class SchedullerActor extends ReflectedActor {
 
+        private PrepareSchedule prepareSchedule = new PrepareSchedule();
+
         public SchedullerActor(ActorSystem system) {
             super(system, "scheduller", "scheduller");
         }
 
-        public void onScheduleMessage() {
-
-        }
-    }
-
-    private class SchedullerThread extends Thread {
-        private SchedullerThread() {
-            setName("Scheduller#" + hashCode());
+        public Messenger messenger() {
+            return new Messenger(self());
         }
 
         @Override
-        public void run() {
-            setPriority(Thread.MIN_PRIORITY);
-            PrepareSchedule prepareSchedule = new PrepareSchedule();
-            while (!isClosed) {
+        protected void registerMethods() {
+            registerMethod("schedule").enableSingleShot();
+        }
+
+        public void onScheduleMessage() {
+            int[] contextIds;
+            synchronized (contexts) {
+                TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
+                contextIds = new int[currentContexts.length];
+                for (int i = 0; i < contextIds.length; i++) {
+                    contextIds[i] = currentContexts[i].getContextId();
+                }
+            }
+
+            scheduller.prepareScheduller(prepareSchedule, contextIds);
+            if (prepareSchedule.isDoWait()) {
                 if (Logger.LOG_THREADS) {
-                    Logger.d(TAG, "Scheduller Iteration");
+                    Logger.d(TAG, "Scheduller:wait " + prepareSchedule.getDelay());
                 }
+                messenger().scheduleDelayed(prepareSchedule.getDelay());
+                return;
+            }
 
-                int[] contextIds;
-                synchronized (contexts) {
-                    TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
-                    contextIds = new int[currentContexts.length];
-                    for (int i = 0; i < contextIds.length; i++) {
-                        contextIds[i] = currentContexts[i].getContextId();
-                    }
-                }
-
-                synchronized (scheduller) {
-                    scheduller.prepareScheduller(prepareSchedule, contextIds);
-                    if (prepareSchedule.isDoWait()) {
-                        if (Logger.LOG_THREADS) {
-                            Logger.d(TAG, "Scheduller:wait " + prepareSchedule.getDelay());
+            TcpContext context = null;
+            synchronized (contexts) {
+                TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
+                outer:
+                for (int i = 0; i < currentContexts.length; i++) {
+                    int index = (i + roundRobin + 1) % currentContexts.length;
+                    for (int allowed : prepareSchedule.getAllowedContexts()) {
+                        if (currentContexts[index].getContextId() == allowed) {
+                            context = currentContexts[index];
+                            break outer;
                         }
-                        try {
-                            scheduller.wait(prepareSchedule.getDelay());
-                        } catch (InterruptedException e) {
-                            Logger.e(TAG, e);
-                            return;
-                        }
-                        continue;
                     }
+
                 }
 
-                TcpContext context = null;
-                synchronized (contexts) {
-                    TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
-                    outer:
-                    for (int i = 0; i < currentContexts.length; i++) {
-                        int index = (i + roundRobin + 1) % currentContexts.length;
-                        for (int allowed : prepareSchedule.getAllowedContexts()) {
-                            if (currentContexts[index].getContextId() == allowed) {
-                                context = currentContexts[index];
-                                break outer;
-                            }
-                        }
-
-                    }
-
-                    if (currentContexts.length != 0) {
-                        roundRobin = (roundRobin + 1) % currentContexts.length;
-                    }
+                if (currentContexts.length != 0) {
+                    roundRobin = (roundRobin + 1) % currentContexts.length;
                 }
+            }
 
-                if (context == null) {
-                    if (Logger.LOG_THREADS) {
-                        Logger.d(TAG, "Scheduller: no context");
-                    }
-                    continue;
-                }
-
+            if (context == null) {
                 if (Logger.LOG_THREADS) {
-                    Logger.d(TAG, "doSchedule");
+                    Logger.d(TAG, "Scheduller: no context");
                 }
+                messenger().schedule();
+                return;
+            }
 
-                synchronized (scheduller) {
-                    long start = System.currentTimeMillis();
-                    PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId(), initedContext.contains(context.getContextId()));
-                    if (Logger.LOG_THREADS) {
-                        Logger.d(TAG, "Schedulled in " + (System.currentTimeMillis() - start) + " ms");
-                    }
-                    if (preparedPackage == null) {
-                        continue;
-                    }
+            if (Logger.LOG_THREADS) {
+                Logger.d(TAG, "doSchedule");
+            }
 
-                    if (Logger.LOG_THREADS) {
-                        Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): time:" + getUnixTime(preparedPackage.getMessageId()));
-                        Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): seqNo:" + preparedPackage.getSeqNo() + ", msgId" + preparedPackage.getMessageId());
-                    }
+            long start = System.currentTimeMillis();
+            PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId(), initedContext.contains(context.getContextId()));
+            if (Logger.LOG_THREADS) {
+                Logger.d(TAG, "Schedulled in " + (System.currentTimeMillis() - start) + " ms");
+            }
+            if (preparedPackage == null) {
+                messenger().schedule();
+                return;
+            }
 
-                    try {
-                        EncryptedMessage msg = encrypt(preparedPackage.getSeqNo(), preparedPackage.getMessageId(), preparedPackage.getContent());
-                        if (preparedPackage.isHighPriority()) {
-                            scheduller.registerFastConfirm(preparedPackage.getMessageId(), msg.fastConfirm);
-                        }
-                        if (!context.isClosed()) {
-                            context.postMessage(msg.data, preparedPackage.isHighPriority());
-                            initedContext.add(context.getContextId());
-                        } else {
-                            scheduller.onConnectionDies(context.getContextId());
-                        }
-                    } catch (IOException e) {
-                        Logger.e(TAG, e);
-                    }
+            if (Logger.LOG_THREADS) {
+                Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): time:" + getUnixTime(preparedPackage.getMessageId()));
+                Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): seqNo:" + preparedPackage.getSeqNo() + ", msgId" + preparedPackage.getMessageId());
+            }
+
+            try {
+                EncryptedMessage msg = encrypt(preparedPackage.getSeqNo(), preparedPackage.getMessageId(), preparedPackage.getContent());
+                if (preparedPackage.isHighPriority()) {
+                    scheduller.registerFastConfirm(preparedPackage.getMessageId(), msg.fastConfirm);
                 }
+                if (!context.isClosed()) {
+                    context.postMessage(msg.data, preparedPackage.isHighPriority());
+                    initedContext.add(context.getContextId());
+                } else {
+                    scheduller.onConnectionDies(context.getContextId());
+                }
+            } catch (IOException e) {
+                Logger.e(TAG, e);
+            }
+
+            messenger().schedule();
+        }
+
+        private class Messenger extends ActorMessenger {
+
+            protected Messenger(ActorReference reference) {
+                super(reference, null);
+            }
+
+            public void schedule() {
+                talkRaw("schedule");
+            }
+
+            public void scheduleDelayed(long delay) {
+                talkRawDelayed("schedule", delay);
+            }
+
+            @Override
+            public ActorMessenger cloneForSender(ActorReference sender) {
+                return null;
             }
         }
     }

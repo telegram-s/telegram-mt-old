@@ -20,7 +20,6 @@ import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.telegram.mtproto.secure.CryptoUtils.*;
-import static org.telegram.mtproto.util.TimeUtil.getUnixTime;
 import static org.telegram.tl.StreamingUtils.*;
 
 /**
@@ -47,8 +46,6 @@ public class MTProto {
 
     private static final int PING_INTERVAL_REQUEST_LOW_MODE = 5 * 60 * 1000; // 5 Min
     private static final int PING_INTERVAL_LOW_MODE = 6 * 60 * 1000; // 6 min
-
-    private static final int CONNECTION_KEEP_ALIVE_LOW = 30 * 1000; // 30 secs
 
     private static final int ERROR_MSG_ID_TOO_SMALL = 16;
     private static final int ERROR_MSG_ID_TOO_BIG = 17;
@@ -134,11 +131,11 @@ public class MTProto {
     }
 
     public void resetNetworkBackoff() {
-        // this.exponentalBackoff.reset();
+        transportPool.resetConnectionBackoff();
     }
 
     public void reloadConnectionInformation() {
-        // this.connectionRate = new TransportRate(state.getAvailableConnections());
+        transportPool.reloadConnectionInformation();
     }
 
     public int getInstanceIndex() {
@@ -165,74 +162,31 @@ public class MTProto {
         return actorSystem;
     }
 
-    @Override
-    public String toString() {
-        return "mtproto#" + INSTANCE_INDEX;
-    }
-
-    public void close() {
-        if (!isClosed) {
-            this.isClosed = true;
-            closeConnections();
-        }
-    }
-
     public boolean isClosed() {
         return isClosed;
     }
 
-    public void closeConnections() {
-//        synchronized (contexts) {
-//            for (TcpContext context : contexts) {
-//                context.close();
-//                scheduller.onConnectionDies(context.getContextId());
-//            }
-//            contexts.clear();
-//            connectionActor.check();
-//        }
-    }
-
-    private boolean needProcessing(long messageId) {
-        synchronized (receivedMessages) {
-            if (receivedMessages.contains(messageId)) {
-                return false;
-            }
-
-            if (receivedMessages.size() > MESSAGES_CACHE_MIN) {
-                boolean isSmallest = true;
-                for (Long l : receivedMessages) {
-                    if (messageId > l) {
-                        isSmallest = false;
-                        break;
-                    }
-                }
-
-                if (isSmallest) {
-                    return false;
-                }
-            }
-
-            while (receivedMessages.size() >= MESSAGES_CACHE - 1) {
-                receivedMessages.remove(0);
-            }
-            receivedMessages.add(messageId);
-        }
-
-        return true;
+    public int sendRpcMessage(TLMethod request, long timeout, boolean highPriority) {
+        int id = scheduller.postMessage(request, true, timeout, highPriority);
+        Logger.d(TAG, "sendMessage #" + id + " " + request.toString());
+        return id;
     }
 
     public void forgetMessage(int id) {
         scheduller.forgetMessage(id);
     }
 
-    public int sendRpcMessage(TLMethod request, long timeout, boolean highPriority) {
-        return sendMessage(request, timeout, true, highPriority);
+    public void switchMode(int mode) {
+        this.mode = mode;
+        actionsActor.ping();
     }
 
-    public int sendMessage(TLObject request, long timeout, boolean isRpc, boolean highPriority) {
-        int id = scheduller.postMessage(request, isRpc, timeout, highPriority);
-        Logger.d(TAG, "sendMessage #" + id + " " + request.toString());
-        return id;
+    public void close() {
+        if (!isClosed) {
+            this.isClosed = true;
+            this.actorSystem.close();
+            this.transportPool.close();
+        }
     }
 
     // Finding message type
@@ -250,15 +204,11 @@ public class MTProto {
             TLObject intMessage = protoContext.deserializeMessage(new ByteArrayInputStream(mtMessage.getContent()));
             onMTProtoMessage(mtMessage.getMessageId(), intMessage);
         } catch (DeserializeException e) {
-            onApiMessage(mtMessage.getContent());
+            callback.onApiMessage(mtMessage.getContent(), this);
         } catch (IOException e) {
             Logger.e(TAG, e);
             // ???
         }
-    }
-
-    private void onApiMessage(byte[] data) {
-        callback.onApiMessage(data, this);
     }
 
     private void onMTProtoMessage(long msgId, TLObject object) {
@@ -282,6 +232,7 @@ public class MTProto {
                     if (scheduller.isMessageFromCurrentGeneration(badMessage.getBadMsgId())) {
                         Logger.d(TAG, "Resetting session");
                         session = Entropy.generateSeed(8);
+                        transportPool.onSessionChanged(session);
                         scheduller.resetSession();
                     }
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
@@ -446,6 +397,40 @@ public class MTProto {
         }
     }
 
+    private boolean needProcessing(long messageId) {
+        synchronized (receivedMessages) {
+            if (receivedMessages.contains(messageId)) {
+                return false;
+            }
+
+            if (receivedMessages.size() > MESSAGES_CACHE_MIN) {
+                boolean isSmallest = true;
+                for (Long l : receivedMessages) {
+                    if (messageId > l) {
+                        isSmallest = false;
+                        break;
+                    }
+                }
+
+                if (isSmallest) {
+                    return false;
+                }
+            }
+
+            while (receivedMessages.size() >= MESSAGES_CACHE - 1) {
+                receivedMessages.remove(0);
+            }
+            receivedMessages.add(messageId);
+        }
+
+        return true;
+    }
+
+    @Override
+    public String toString() {
+        return "mtproto#" + INSTANCE_INDEX;
+    }
+
     private class InternalActionsActor extends ReflectedActor {
 
         public InternalActionsActor(ActorSystem system) {
@@ -467,7 +452,7 @@ public class MTProto {
         public void onRequestSaltsMessage() {
             Logger.d(TAG, "Salt check timeout");
             if (TimeOverlord.getInstance().getTimeAccuracy() > 1000) {
-                Logger.d(TAG, "Time is not accurate");
+                Logger.d(TAG, "Time is not accurate: " + TimeOverlord.getInstance().getTimeAccuracy());
                 messenger().requestSaltsDelayed(FUTURE_NO_TIME_TIMEOUT);
                 return;
             }
@@ -480,7 +465,7 @@ public class MTProto {
         }
 
         public void onPingDelayMessage() {
-            Logger.d(TAG, "Ping delay disconnect");
+            Logger.d(TAG, "Ping delay disconnect for " + PING_INTERVAL + " sec");
             scheduller.postMessage(new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL),
                     false, PING_INTERVAL_REQUEST);
             messenger().pingDelayed(PING_INTERVAL_REQUEST);

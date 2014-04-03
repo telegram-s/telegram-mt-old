@@ -221,7 +221,7 @@ public class Scheduller {
         }
     }
 
-    public void registerFastConfirm(long msgId, int fastConfirm) {
+    public synchronized void registerFastConfirm(long msgId, int fastConfirm) {
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             boolean contains = false;
             for (Long relatedMsgId : schedullerPackage.relatedMessageIds) {

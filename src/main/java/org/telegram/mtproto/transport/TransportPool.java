@@ -67,6 +67,10 @@ public abstract class TransportPool implements SchedullerListener {
         this.session = session;
     }
 
+    public abstract void reloadConnectionInformation();
+
+    public abstract void resetConnectionBackoff();
+
     protected synchronized void onMTMessage(MTMessage message) {
         if (isClosed) {
             return;
