@@ -4,6 +4,7 @@ apply plugin: 'java'
 
 dependencies {
     compile project(':tl-core')
+    compile project(':actors')
 }
 
 def basicVersion = '1.0'

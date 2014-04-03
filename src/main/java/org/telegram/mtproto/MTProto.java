@@ -1,5 +1,6 @@
 package org.telegram.mtproto;
 
+import org.telegram.actors.*;
 import org.telegram.mtproto.backoff.ExponentalBackoff;
 import org.telegram.mtproto.log.Logger;
 import org.telegram.mtproto.schedule.PrepareSchedule;
@@ -43,6 +44,10 @@ import static org.telegram.tl.StreamingUtils.*;
  */
 public class MTProto {
 
+    private static final int MODE_GENERAL = 0;
+    private static final int MODE_KEEP_ALIVE_LOW = 1;
+    private static final int MODE_LOW = 2;
+
     private static final AtomicInteger instanceIndex = new AtomicInteger(1000);
 
     private static final int MESSAGES_CACHE = 100;
@@ -50,8 +55,13 @@ public class MTProto {
 
     private static final int MAX_INTERNAL_FLOOD_WAIT = 10;//10 sec
 
-    private static final int PING_INTERVAL_REQUEST = 60000;
+    private static final int PING_INTERVAL_REQUEST = 60000;// 1 min
     private static final int PING_INTERVAL = 75;//75 secs
+
+    private static final int PING_INTERVAL_REQUEST_LOW_MODE = 5 * 60 * 1000; // 5 Min
+    private static final int PING_INTERVAL_LOW_MODE = 6 * 60 * 1000; // 6 min
+
+    private static final int CONNECTION_KEEP_ALIVE_LOW = 30 * 1000; // 30 secs
 
     private static final int ERROR_MSG_ID_TOO_SMALL = 16;
     private static final int ERROR_MSG_ID_TOO_BIG = 17;
@@ -85,7 +95,6 @@ public class MTProto {
     private final HashSet<Integer> connectedContexts = new HashSet<Integer>();
     private final HashSet<Integer> initedContext = new HashSet<Integer>();
     private TcpContextCallback tcpListener;
-    private ConnectionFixerThread connectionFixerThread;
 
     private final Scheduller scheduller;
     private SchedullerThread schedullerThread;
@@ -116,6 +125,12 @@ public class MTProto {
 
     private ExponentalBackoff exponentalBackoff;
 
+    private ActorSystem actorSystem;
+
+    private int mode = MODE_GENERAL;
+
+    private ConnectorMessenger connectionActor;
+
     public MTProto(AbsMTProtoState state, MTProtoCallback callback, CallWrapper callWrapper, int connectionsCount) {
         this.INSTANCE_INDEX = instanceIndex.incrementAndGet();
         this.TAG = "MTProto#" + INSTANCE_INDEX;
@@ -134,8 +149,14 @@ public class MTProto {
         this.schedullerThread.start();
         this.responseProcessor = new ResponseProcessor();
         this.responseProcessor.start();
-        this.connectionFixerThread = new ConnectionFixerThread();
-        this.connectionFixerThread.start();
+        this.actorSystem = new ActorSystem();
+        this.actorSystem.addThread("connector");
+        this.connectionActor = new ConnectorMessenger(new ConnectionActor(actorSystem).self(), null);
+        this.connectionActor.check();
+    }
+
+    public AbsMTProtoState getState() {
+        return state;
     }
 
     public void resetNetworkBackoff() {
@@ -150,6 +171,14 @@ public class MTProto {
         return INSTANCE_INDEX;
     }
 
+    /* package */ Scheduller getScheduller() {
+        return scheduller;
+    }
+
+    /* package */ int getDesiredConnectionCount() {
+        return desiredConnectionCount;
+    }
+
     @Override
     public String toString() {
         return "mtproto#" + INSTANCE_INDEX;
@@ -158,9 +187,9 @@ public class MTProto {
     public void close() {
         if (!isClosed) {
             this.isClosed = true;
-            if (this.connectionFixerThread != null) {
-                this.connectionFixerThread.interrupt();
-            }
+//            if (this.connectionFixerThread != null) {
+//                this.connectionFixerThread.interrupt();
+//            }
             if (this.schedullerThread != null) {
                 this.schedullerThread.interrupt();
             }
@@ -182,7 +211,7 @@ public class MTProto {
                 scheduller.onConnectionDies(context.getContextId());
             }
             contexts.clear();
-            contexts.notifyAll();
+            connectionActor.check();
         }
     }
 
@@ -460,13 +489,15 @@ public class MTProto {
 
     private void internalSchedule() {
         long time = System.nanoTime() / 1000000;
-        if (time - lastPingTime > PING_INTERVAL_REQUEST) {
-            lastPingTime = time;
-            synchronized (contexts) {
-                for (TcpContext context : contexts) {
-                    scheduller.postMessageDelayed(
-                            new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL),
-                            false, PING_INTERVAL_REQUEST, 0, context.getContextId(), false);
+        if (mode == MODE_GENERAL) {
+            if (time - lastPingTime > PING_INTERVAL_REQUEST) {
+                lastPingTime = time;
+                synchronized (contexts) {
+                    for (TcpContext context : contexts) {
+                        scheduller.postMessageDelayed(
+                                new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL),
+                                false, PING_INTERVAL_REQUEST, 0, context.getContextId(), false);
+                    }
                 }
             }
         }
@@ -615,19 +646,6 @@ public class MTProto {
         return new MTMessage(messageId, mes_seq, message, message.length);
     }
 
-    public static int readInt(byte[] src) {
-        return readInt(src, 0);
-    }
-
-    public static int readInt(byte[] src, int offset) {
-        int a = src[offset + 0] & 0xFF;
-        int b = src[offset + 1] & 0xFF;
-        int c = src[offset + 2] & 0xFF;
-        int d = src[offset + 3] & 0xFF;
-
-        return a + (b << 8) + (c << 16) + (d << 24);
-    }
-
     private class SchedullerThread extends Thread {
         private SchedullerThread() {
             setName("Scheduller#" + hashCode());
@@ -764,58 +782,108 @@ public class MTProto {
         }
     }
 
-    private class ConnectionFixerThread extends Thread {
-        private ConnectionFixerThread() {
-            setName("ConnectionFixerThread#" + hashCode());
+    private class ResponseActor extends ReflectedActor {
+
+        public ResponseActor(ActorSystem system) {
+            super(system, "response", "response");
+        }
+
+        protected void onNewMessage(MTMessage message) {
+            onMTMessage(message);
+            BytesCache.getInstance().put(message.getContent());
+        }
+
+        protected void onRawMessage(byte[] data, int offset, int len, int contextId) {
+
+        }
+    }
+
+    private class ResponseMessenger extends ActorMessenger {
+
+        protected ResponseMessenger(ActorReference reference) {
+            super(reference, null);
+        }
+
+        protected ResponseMessenger(ActorReference reference, ActorReference sender) {
+            super(reference, sender);
+        }
+
+        public void onMessage(MTMessage message) {
+            talkRaw("new", message);
+        }
+
+        public void onRawMessage(byte[] data, int offset, int len, int contextId) {
+            talkRaw("raw", data, offset, len, contextId);
         }
 
         @Override
-        public void run() {
-            setPriority(Thread.MIN_PRIORITY);
-            while (!isClosed) {
-                if (Logger.LOG_THREADS) {
-                    Logger.d(TAG, "Connection Fixer Iteration");
-                }
-                synchronized (contexts) {
-                    if (contexts.size() >= desiredConnectionCount) {
-                        try {
-                            contexts.wait();
-                        } catch (InterruptedException e) {
-                            return;
-                        }
-                    }
-                }
+        public ActorMessenger cloneForSender(ActorReference sender) {
+            return new ResponseMessenger(reference, sender);
+        }
+    }
 
-                ConnectionType type = connectionRate.tryConnection();
-                try {
-                    TcpContext context = new TcpContext(MTProto.this, type.getHost(), type.getPort(), USE_CHECKSUM, tcpListener);
-                    if (isClosed) {
-                        return;
-                    }
-                    scheduller.postMessageDelayed(new MTPing(Entropy.generateRandomId()), false, PING_TIMEOUT, 0, context.getContextId(), false);
-                    synchronized (contexts) {
-                        contexts.add(context);
-                        contextConnectionId.put(context.getContextId(), type.getId());
-                    }
-                    synchronized (scheduller) {
-                        scheduller.notifyAll();
-                    }
-                } catch (IOException e) {
-                    Logger.e(TAG, e);
-                    try {
-                        exponentalBackoff.onFailure();
-                    } catch (InterruptedException e1) {
-                        Logger.e(TAG, e1);
-                        return;
-                    }
-                    connectionRate.onConnectionFailure(type.getId());
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e1) {
-                        Logger.e(TAG, e1);
-                    }
+    private class ConnectionActor extends Actor {
+
+        private ConnectionActor(ActorSystem system) {
+            super(system, "connector", "connector");
+        }
+
+        @Override
+        protected void registerMethods() {
+            registerKind("check")
+                    .enabledBackOff()
+                    .enableSingleShot();
+        }
+
+        @Override
+        protected void process(String name, Object[] args, ActorReference sender) throws Exception {
+            synchronized (contexts) {
+                if (contexts.size() >= desiredConnectionCount) {
+                    return;
                 }
             }
+
+            ConnectionType type = connectionRate.tryConnection();
+            try {
+                TcpContext context = new TcpContext(MTProto.this, type.getHost(), type.getPort(), USE_CHECKSUM, tcpListener);
+                if (isClosed) {
+                    return;
+                }
+                scheduller.postMessageDelayed(new MTPing(Entropy.generateRandomId()), false, PING_TIMEOUT, 0, context.getContextId(), false);
+                synchronized (contexts) {
+                    contexts.add(context);
+                    contextConnectionId.put(context.getContextId(), type.getId());
+                }
+                synchronized (scheduller) {
+                    scheduller.notifyAll();
+                }
+            } catch (IOException e) {
+                Logger.e(TAG, e);
+                connectionRate.onConnectionFailure(type.getId());
+                throw e;
+            }
+
+            self().talk("check", null);
+        }
+    }
+
+    private class ConnectorMessenger extends ActorMessenger {
+
+        private ConnectorMessenger(ActorReference reference) {
+            super(reference, null);
+        }
+
+        private ConnectorMessenger(ActorReference reference, ActorReference sender) {
+            super(reference, sender);
+        }
+
+        public void check() {
+            talkRaw("check");
+        }
+
+        @Override
+        public ActorMessenger cloneForSender(ActorReference sender) {
+            return new ConnectorMessenger(reference, sender);
         }
     }
 
@@ -872,7 +940,7 @@ public class MTProto {
                         connectionRate.onConnectionFailure(contextConnectionId.get(context.getContextId()));
                     }
                     contexts.remove(context);
-                    contexts.notifyAll();
+                    connectionActor.check();
                     scheduller.onConnectionDies(context.getContextId());
                 }
             }
@@ -904,7 +972,7 @@ public class MTProto {
                         connectionRate.onConnectionFailure(contextConnectionId.get(contextId));
                     }
                 }
-                contexts.notifyAll();
+                connectionActor.check();
             }
             scheduller.onConnectionDies(context.getContextId());
             requestSchedule();
@@ -915,7 +983,6 @@ public class MTProto {
             if (isClosed) {
                 return;
             }
-            scheduller.onMessageFastConfirmed(hash);
             int[] ids = scheduller.mapFastConfirm(hash);
             for (int id : ids) {
                 callback.onConfirmed(id);

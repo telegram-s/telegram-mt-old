@@ -293,16 +293,6 @@ public class Scheduller {
         return res2;
     }
 
-    public void onMessageFastConfirmed(int fastConfirm) {
-//        for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
-//            if (schedullerPackage.state == STATE_SENT) {
-//                if (schedullerPackage.relatedFastConfirm.contains(fastConfirm)) {
-//                    schedullerPackage.state = STATE_CONFIRMED;
-//                }
-//            }
-//        }
-    }
-
     public void onMessageConfirmed(long msgId) {
         for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
             if (schedullerPackage.state == STATE_SENT) {
