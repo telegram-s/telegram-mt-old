@@ -822,7 +822,7 @@ public class MTProto {
         }
     }
 
-    private class ConnectionActor extends Actor {
+    private class ConnectionActor extends ReflectedActor {
 
         private ConnectionActor(ActorSystem system) {
             super(system, "connector", "connector");
@@ -830,13 +830,12 @@ public class MTProto {
 
         @Override
         protected void registerMethods() {
-            registerKind("check")
+            registerMethod("check")
                     .enabledBackOff()
                     .enableSingleShot();
         }
 
-        @Override
-        protected void process(String name, Object[] args, ActorReference sender) throws Exception {
+        protected void onCheckMessage() throws Exception {
             synchronized (contexts) {
                 if (contexts.size() >= desiredConnectionCount) {
                     return;
