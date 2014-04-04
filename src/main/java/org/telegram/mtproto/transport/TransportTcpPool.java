@@ -25,11 +25,11 @@ import static org.telegram.mtproto.util.TimeUtil.getUnixTime;
  */
 public class TransportTcpPool extends TransportPool {
 
-    private static final String TAG = "TransportTcpPool";
+    private final String TAG;
+    private static final boolean USE_CHECKSUM = false;
+    private static final int LOW_TIME_DIE_CHECK = 30 * 1000; // 30 sec
 
     private int desiredConnectionCount;
-
-    private static final boolean USE_CHECKSUM = false;
 
     private final HashSet<TcpContext> contexts = new HashSet<TcpContext>();
     private final HashMap<Integer, Integer> contextConnectionId = new HashMap<Integer, Integer>();
@@ -53,6 +53,7 @@ public class TransportTcpPool extends TransportPool {
 
     public TransportTcpPool(MTProto proto, TransportPoolCallback callback, int connectionCount) {
         super(proto, callback);
+        TAG = "TransportTcpPool#" + proto.getInstanceIndex();
         this.exponentalBackoff = new ExponentalBackoff(TAG);
         this.desiredConnectionCount = connectionCount;
         this.actorSystem = proto.getActorSystem();
@@ -60,13 +61,20 @@ public class TransportTcpPool extends TransportPool {
         this.connectionActor = new ConnectionActor(actorSystem).messenger();
         this.connectionRate = new TransportRate(proto.getState().getAvailableConnections());
         this.scheduleActor = new SchedullerActor(actorSystem).messenger();
-        this.connectionActor.check();
-        this.scheduleActor.schedule();
+
+        scheduleActor.schedule();
+        connectionActor.check();
     }
 
     @Override
     public void onSchedullerUpdated(Scheduller scheduller) {
         scheduleActor.schedule();
+        synchronized (contexts) {
+            if (contexts.size() == 0) {
+                this.connectionActor.check();
+            }
+        }
+        connectionActor.checkDestroy();
     }
 
     @Override
@@ -77,6 +85,13 @@ public class TransportTcpPool extends TransportPool {
     @Override
     public void resetConnectionBackoff() {
         exponentalBackoff.reset();
+    }
+
+    @Override
+    protected void onModeChanged() {
+        scheduleActor.schedule();
+        connectionActor.check();
+        connectionActor.checkDestroy();
     }
 
     private class ConnectionActor extends ReflectedActor {
@@ -97,19 +112,45 @@ public class TransportTcpPool extends TransportPool {
             registerMethod("check")
                     .enabledBackOff()
                     .enableSingleShot();
+            registerMethod("checkDestroy")
+                    .enableSingleShot();
         }
 
+        protected void onCheckDestroyMessage() throws Exception {
+            if (mode == MODE_LOWMODE) {
+                if (scheduller.hasRequests()) {
+                    messenger().checkDestroy();
+                    return;
+                }
+
+                Logger.d(TAG, "Destroying contexts");
+                synchronized (contexts) {
+                    for (TcpContext c : contexts) {
+                        c.close();
+                    }
+                    contexts.clear();
+                }
+            }
+        }
 
         protected void onCheckMessage() throws Exception {
+            if (mode == MODE_LOWMODE) {
+                if (!scheduller.hasRequests()) {
+                    return;
+                }
+            }
+
             synchronized (contexts) {
                 if (contexts.size() >= desiredConnectionCount) {
                     return;
                 }
             }
 
+            Logger.d(TAG, "Creating context...");
             ConnectionType type = connectionRate.tryConnection();
             try {
                 TcpContext context = new TcpContext(proto, type.getHost(), type.getPort(), USE_CHECKSUM, tcpListener);
+                Logger.d(TAG, "Context created.");
                 synchronized (contexts) {
                     contexts.add(context);
                     contextConnectionId.put(context.getContextId(), type.getId());
@@ -135,6 +176,10 @@ public class TransportTcpPool extends TransportPool {
 
             public void check() {
                 talkRaw("check");
+            }
+
+            public void checkDestroy() {
+                talkRawDelayed("checkDestroy", LOW_TIME_DIE_CHECK);
             }
 
             @Override

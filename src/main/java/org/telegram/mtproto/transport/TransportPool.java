@@ -60,6 +60,17 @@ public abstract class TransportPool implements SchedullerListener {
         isClosed = true;
     }
 
+    public void switchMode(int mode) {
+        if (this.mode != mode) {
+            this.mode = mode;
+            onModeChanged();
+        }
+    }
+
+    protected void onModeChanged() {
+
+    }
+
     public void onSessionChanged(byte[] session) {
         if (isClosed) {
             return;

@@ -30,9 +30,10 @@ import static org.telegram.tl.StreamingUtils.*;
  */
 public class MTProto {
 
-    private static final int MODE_GENERAL = 0;
-    private static final int MODE_KEEP_ALIVE_LOW = 1;
-    private static final int MODE_LOW = 2;
+    public static final int MODE_GENERAL = 0;
+    public static final int MODE_GENERAL_LOW_MODE = 1;
+    public static final int MODE_FILE = 2;
+    public static final int MODE_PUSH = 3;
 
     private static final AtomicInteger instanceIndex = new AtomicInteger(1000);
 
@@ -44,8 +45,7 @@ public class MTProto {
     private static final int PING_INTERVAL_REQUEST = 60000;// 1 min
     private static final int PING_INTERVAL = 75;//75 secs
 
-    private static final int PING_INTERVAL_REQUEST_LOW_MODE = 5 * 60 * 1000; // 5 Min
-    private static final int PING_INTERVAL_LOW_MODE = 6 * 60 * 1000; // 6 min
+    private static final int PING_PUSH_REQUEST = 9 * 60 * 1000; // 5 Min
 
     private static final int ERROR_MSG_ID_TOO_SMALL = 16;
     private static final int ERROR_MSG_ID_TOO_BIG = 17;
@@ -90,9 +90,14 @@ public class MTProto {
 
     private boolean isClosed;
 
-    public MTProto(AbsMTProtoState state, final MTProtoCallback callback, CallWrapper callWrapper, int connectionsCount) {
+    public MTProto(AbsMTProtoState state,
+                   MTProtoCallback callback,
+                   CallWrapper callWrapper,
+                   int connectionsCount,
+                   int mode) {
         this.INSTANCE_INDEX = instanceIndex.incrementAndGet();
         this.TAG = "MTProto#" + INSTANCE_INDEX;
+        this.mode = mode;
         this.actorSystem = new ActorSystem();
         this.actorSystem.addThread("response");
         this.actorSystem.addThread("connector");
@@ -105,6 +110,7 @@ public class MTProto {
         this.desiredConnectionCount = connectionsCount;
         this.session = Entropy.generateSeed(8);
         this.scheduller = new Scheduller(this, callWrapper);
+        this.scheduller.postMessage(new MTPing(Entropy.generateRandomId()), false, Long.MAX_VALUE);
         this.responseActor = new ResponseActor(actorSystem).messenger();
         this.actionsActor = new InternalActionsActor(actorSystem).messenger();
         this.transportPool = new TransportTcpPool(this, new TransportPoolCallback() {
@@ -118,10 +124,21 @@ public class MTProto {
                 // We might not send this to response actor for providing faster confirmation
                 int[] ids = scheduller.mapFastConfirm(hash);
                 for (int id : ids) {
-                    callback.onConfirmed(id);
+                    MTProto.this.callback.onConfirmed(id);
                 }
             }
         }, desiredConnectionCount);
+        switch (mode) {
+            case MODE_GENERAL:
+            case MODE_PUSH:
+                transportPool.switchMode(TransportPool.MODE_DEFAULT);
+                break;
+            case MODE_GENERAL_LOW_MODE:
+            case MODE_FILE:
+                transportPool.switchMode(TransportPool.MODE_LOWMODE);
+                break;
+
+        }
         this.actionsActor.ping();
         this.actionsActor.requestSalts();
     }
@@ -177,8 +194,23 @@ public class MTProto {
     }
 
     public void switchMode(int mode) {
-        this.mode = mode;
-        actionsActor.ping();
+        if (this.mode != mode) {
+            this.mode = mode;
+
+            switch (mode) {
+                case MODE_GENERAL:
+                case MODE_PUSH:
+                    transportPool.switchMode(TransportPool.MODE_DEFAULT);
+                    break;
+                case MODE_GENERAL_LOW_MODE:
+                case MODE_FILE:
+                    transportPool.switchMode(TransportPool.MODE_LOWMODE);
+                    break;
+
+            }
+
+            actionsActor.ping();
+        }
     }
 
     public void close() {
@@ -465,10 +497,14 @@ public class MTProto {
         }
 
         public void onPingDelayMessage() {
-            Logger.d(TAG, "Ping delay disconnect for " + PING_INTERVAL + " sec");
-            scheduller.postMessage(new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL),
-                    false, PING_INTERVAL_REQUEST);
-            messenger().pingDelayed(PING_INTERVAL_REQUEST);
+            if (mode == MODE_GENERAL) {
+                Logger.d(TAG, "Ping delay disconnect for " + PING_INTERVAL + " sec");
+                scheduller.postMessage(new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL),
+                        false, PING_INTERVAL_REQUEST);
+                messenger().pingDelayed(PING_INTERVAL_REQUEST);
+            } else if (mode == MODE_PUSH) {
+
+            }
         }
 
         private class Messenger extends ActorMessenger {

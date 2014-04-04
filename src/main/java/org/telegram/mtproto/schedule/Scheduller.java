@@ -392,6 +392,16 @@ public class Scheduller {
         return foundedPackages;
     }
 
+    public synchronized boolean hasRequests() {
+        for (SchedullerPackage schedullerPackage : messages.values().toArray(new SchedullerPackage[0])) {
+            if (schedullerPackage.isRpc)
+                return true;
+        }
+
+        return false;
+    }
+
+
     public synchronized PreparedPackage doSchedule(int contextId, boolean isInited) {
         ArrayList<SchedullerPackage> foundedPackages = actualPackages(contextId);
 
