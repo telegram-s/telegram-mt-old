@@ -503,7 +503,8 @@ public class MTProto {
                         false, PING_INTERVAL_REQUEST);
                 messenger().pingDelayed(PING_INTERVAL_REQUEST);
             } else if (mode == MODE_PUSH) {
-
+                scheduller.postMessage(new MTPing(Entropy.generateRandomId()), false, PING_PUSH_REQUEST);
+                messenger().pingDelayed(PING_PUSH_REQUEST);
             }
         }
 
