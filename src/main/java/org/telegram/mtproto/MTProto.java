@@ -148,11 +148,13 @@ public class MTProto {
     }
 
     public void resetNetworkBackoff() {
-        transportPool.resetConnectionBackoff();
+        this.transportPool.resetConnectionBackoff();
+        this.actionsActor.ping();
     }
 
     public void reloadConnectionInformation() {
-        transportPool.reloadConnectionInformation();
+        this.transportPool.reloadConnectionInformation();
+        this.actionsActor.ping();
     }
 
     public int getInstanceIndex() {
