@@ -1,4 +1,5 @@
 rootProject.name = "mtproto"
 
-include ':tl-core'
+include ':tl-core', ':actors'
 project(':tl-core').projectDir = new File( '../tl-core' )
+project(':actors').projectDir = new File( '../actors' )
