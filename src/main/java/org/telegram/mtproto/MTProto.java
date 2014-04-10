@@ -187,7 +187,7 @@ public class MTProto {
 
     public int sendRpcMessage(TLMethod request, long timeout, boolean highPriority) {
         int id = scheduller.postMessage(request, true, timeout, highPriority);
-        Logger.d(TAG, "sendMessage #" + id + " " + request.toString());
+        Logger.d(TAG, "sendMessage #" + id + " " + request.toString() + " with timeout " + timeout + " ms");
         return id;
     }
 
@@ -339,7 +339,7 @@ public class MTProto {
                                     error.getErrorTag().equals("USER_DEACTIVATED") ||
                                     error.getErrorTag().equals("SESSION_REVOKED") ||
                                     error.getErrorTag().equals("SESSION_EXPIRED")) {
-                                Logger.w(TAG, "Auth key invalidated");
+                                Logger.w(TAG, "Auth key invalidated: " + error.getErrorTag());
                                 callback.onAuthInvalidated(this);
                                 close();
                                 return;
@@ -467,6 +467,8 @@ public class MTProto {
 
     private class InternalActionsActor extends ReflectedActor {
 
+        private int lastPingMessage = -1;
+
         public InternalActionsActor(ActorSystem system) {
             super(system, "internal_actions", "scheduller");
         }
@@ -499,13 +501,17 @@ public class MTProto {
         }
 
         public void onPingDelayMessage() {
+            if (lastPingMessage >= 0) {
+                forgetMessage(lastPingMessage);
+                lastPingMessage = -1;
+            }
             if (mode == MODE_GENERAL) {
                 Logger.d(TAG, "Ping delay disconnect for " + PING_INTERVAL + " sec");
-                scheduller.postMessage(new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL),
+                lastPingMessage = scheduller.postMessage(new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL),
                         false, PING_INTERVAL_REQUEST);
                 messenger().pingDelayed(PING_INTERVAL_REQUEST);
             } else if (mode == MODE_PUSH) {
-                scheduller.postMessage(new MTPing(Entropy.generateRandomId()), false, PING_PUSH_REQUEST);
+                lastPingMessage = scheduller.postMessage(new MTPing(Entropy.generateRandomId()), false, PING_INTERVAL_REQUEST);
                 messenger().pingDelayed(PING_PUSH_REQUEST);
             }
         }

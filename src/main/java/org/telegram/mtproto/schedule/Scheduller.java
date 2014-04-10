@@ -30,7 +30,8 @@ public class Scheduller {
     private static final AtomicInteger messagesIds = new AtomicInteger(1);
     private static final ConcurrentHashMap<Long, Long> idGenerationTime = new ConcurrentHashMap<Long, Long>();
 
-    private static final int SCHEDULLER_TIMEOUT = 15 * 1000;//15 sec
+    // private static final int SCHEDULLER_TIMEOUT = 15 * 1000;//15 sec
+    private static final int SCHEDULLER_TIMEOUT = 24 * 60 * 60 * 1000;//24 hours
 
     private static final long CONFIRM_TIMEOUT = 60 * 1000;//60 sec
 

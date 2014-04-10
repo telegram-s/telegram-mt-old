@@ -25,6 +25,8 @@ import static org.telegram.mtproto.util.TimeUtil.getUnixTime;
  */
 public class TransportTcpPool extends TransportPool {
 
+    private static final boolean LOG_SCHEDULLER = true;
+
     private final String TAG;
     private static final boolean USE_CHECKSUM = false;
     private static final int LOW_TIME_DIE_CHECK = 30 * 1000; // 30 sec
@@ -68,6 +70,9 @@ public class TransportTcpPool extends TransportPool {
 
     @Override
     public void onSchedullerUpdated(Scheduller scheduller) {
+        if (LOG_SCHEDULLER) {
+            Logger.d(TAG, "onSchedullerUpdated");
+        }
         scheduleActor.schedule();
         synchronized (contexts) {
             if (contexts.size() == 0) {
@@ -136,18 +141,20 @@ public class TransportTcpPool extends TransportPool {
         protected void onCheckMessage() throws Exception {
             if (mode == MODE_LOWMODE) {
                 if (!scheduller.hasRequests()) {
+                    Logger.d(TAG, "Ignoring context check: scheduller is empty in low mode.");
                     return;
                 }
             }
 
             synchronized (contexts) {
                 if (contexts.size() >= desiredConnectionCount) {
+                    Logger.d(TAG, "Ignoring context check: already created enough contexts.");
                     return;
                 }
             }
 
-            Logger.d(TAG, "Creating context...");
             ConnectionType type = connectionRate.tryConnection();
+            Logger.d(TAG, "Creating context for #" + type.getId() + " " + type.getHost() + ":" + type.getPort());
             try {
                 TcpContext context = new TcpContext(proto, type.getHost(), type.getPort(), USE_CHECKSUM, tcpListener);
                 Logger.d(TAG, "Context created.");
@@ -157,6 +164,7 @@ public class TransportTcpPool extends TransportPool {
                 }
                 scheduller.postMessageDelayed(new MTPing(Entropy.generateRandomId()), false, PING_TIMEOUT, 0, context.getContextId(), false);
             } catch (IOException e) {
+                Logger.d(TAG, "Context create failure.");
                 connectionRate.onConnectionFailure(type.getId());
                 throw e;
             }
@@ -203,10 +211,11 @@ public class TransportTcpPool extends TransportPool {
 
         @Override
         protected void registerMethods() {
-            registerMethod("schedule").enableSingleShot();
+            registerMethod("schedule");
         }
 
         public void onScheduleMessage() {
+            Logger.d(TAG, "onScheduleMessage");
             int[] contextIds;
             synchronized (contexts) {
                 TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
@@ -218,7 +227,7 @@ public class TransportTcpPool extends TransportPool {
 
             scheduller.prepareScheduller(prepareSchedule, contextIds);
             if (prepareSchedule.isDoWait()) {
-                if (Logger.LOG_THREADS) {
+                if (LOG_SCHEDULLER) {
                     Logger.d(TAG, "Scheduller:wait " + prepareSchedule.getDelay());
                 }
                 messenger().scheduleDelayed(prepareSchedule.getDelay());
@@ -246,28 +255,31 @@ public class TransportTcpPool extends TransportPool {
             }
 
             if (context == null) {
-                if (Logger.LOG_THREADS) {
+                if (LOG_SCHEDULLER) {
                     Logger.d(TAG, "Scheduller: no context");
                 }
                 messenger().schedule();
                 return;
             }
 
-            if (Logger.LOG_THREADS) {
+            if (LOG_SCHEDULLER) {
                 Logger.d(TAG, "doSchedule");
             }
 
             long start = System.currentTimeMillis();
             PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId(), initedContext.contains(context.getContextId()));
-            if (Logger.LOG_THREADS) {
+            if (LOG_SCHEDULLER) {
                 Logger.d(TAG, "Schedulled in " + (System.currentTimeMillis() - start) + " ms");
             }
             if (preparedPackage == null) {
+                if (LOG_SCHEDULLER) {
+                    Logger.d(TAG, "No packages for scheduling");
+                }
                 messenger().schedule();
                 return;
             }
 
-            if (Logger.LOG_THREADS) {
+            if (LOG_SCHEDULLER) {
                 Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): time:" + getUnixTime(preparedPackage.getMessageId()));
                 Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): seqNo:" + preparedPackage.getSeqNo() + ", msgId" + preparedPackage.getMessageId());
             }
@@ -285,6 +297,10 @@ public class TransportTcpPool extends TransportPool {
                 }
             } catch (IOException e) {
                 Logger.e(TAG, e);
+            }
+
+            if (LOG_SCHEDULLER) {
+                Logger.d(TAG, "doSchedule end");
             }
 
             messenger().schedule();

@@ -19,6 +19,7 @@ import java.util.zip.CRC32;
  * Created: 13.08.13 14:56
  */
 public class TcpContext {
+    private static final boolean LOG_OPERATIONS = false;
     private static final int MAX_PACKED_SIZE = 1024 * 1024 * 1024;//1 MB
 
     private class Package {
@@ -211,7 +212,7 @@ public class TcpContext {
         public void run() {
             try {
                 while (!isClosed && !isInterrupted()) {
-                    if (Logger.LOG_THREADS) {
+                    if (LOG_OPERATIONS) {
                         Logger.d(TAG, "Reader Iteration");
                     }
                     try {
@@ -359,7 +360,7 @@ public class TcpContext {
         @Override
         public void run() {
             while (!isBroken) {
-                if (Logger.LOG_THREADS) {
+                if (LOG_OPERATIONS) {
                     Logger.d(TAG, "Writer Iteration");
                 }
                 Package p;
@@ -381,6 +382,10 @@ public class TcpContext {
                     } else {
                         continue;
                     }
+                }
+
+                if (LOG_OPERATIONS) {
+                    Logger.d(TAG, "Writing data");
                 }
 
                 try {
@@ -438,6 +443,10 @@ public class TcpContext {
                 } catch (Exception e) {
                     Logger.e(TAG, e);
                     breakContext();
+                }
+
+                if (LOG_OPERATIONS) {
+                    Logger.d(TAG, "End writing data");
                 }
             }
         }
