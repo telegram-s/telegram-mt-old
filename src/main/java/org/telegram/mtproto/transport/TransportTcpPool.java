@@ -1,9 +1,6 @@
 package org.telegram.mtproto.transport;
 
-import org.telegram.actors.ActorMessenger;
-import org.telegram.actors.ActorReference;
-import org.telegram.actors.ActorSystem;
-import org.telegram.actors.ReflectedActor;
+import com.droidkit.actors.*;
 import org.telegram.mtproto.MTProto;
 import org.telegram.mtproto.backoff.ExponentalBackoff;
 import org.telegram.mtproto.log.Logger;
@@ -46,10 +43,10 @@ public class TransportTcpPool extends TransportPool {
 
     private TcpListener tcpListener;
 
-    private ConnectionActor.ConnectorMessenger connectionActor;
-    private SchedullerActor.Messenger scheduleActor;
-
-    private int roundRobin = 0;
+    private ActorRef connectionActor;
+    private ActorRef scheduleActor;
+//    private ConnectionActor.ConnectorMessenger connectionActor;
+//    private SchedullerActor.Messenger scheduleActor;
 
     private ExponentalBackoff exponentalBackoff;
 
@@ -60,12 +57,10 @@ public class TransportTcpPool extends TransportPool {
         this.desiredConnectionCount = connectionCount;
         this.actorSystem = proto.getActorSystem();
         this.tcpListener = new TcpListener();
-        this.connectionActor = new ConnectionActor(actorSystem).messenger();
         this.connectionRate = new TransportRate(proto.getState().getAvailableConnections());
-        this.scheduleActor = new SchedullerActor(actorSystem).messenger();
 
-        scheduleActor.schedule();
-        connectionActor.check();
+        connectionActor = actorSystem.actorOf(connection());
+        scheduleActor = actorSystem.actorOf(scheduller());
     }
 
     @Override
@@ -73,13 +68,13 @@ public class TransportTcpPool extends TransportPool {
         if (LOG_SCHEDULLER) {
             Logger.d(TAG, "onSchedullerUpdated");
         }
-        scheduleActor.schedule();
+        scheduleActor.send(new Schedule());
         synchronized (contexts) {
             if (contexts.size() == 0) {
-                this.connectionActor.check();
+                this.connectionActor.send(new CheckConnections());
             }
         }
-        connectionActor.checkDestroy();
+        this.connectionActor.sendOnce(new CheckDestroy(), LOW_TIME_DIE_CHECK);
     }
 
     @Override
@@ -94,149 +89,164 @@ public class TransportTcpPool extends TransportPool {
 
     @Override
     protected void onModeChanged() {
-        scheduleActor.schedule();
-        connectionActor.check();
-        connectionActor.checkDestroy();
+        this.scheduleActor.send(new Schedule());
+        this.connectionActor.send(new CheckConnections());
+        this.connectionActor.sendOnce(new CheckDestroy(), LOW_TIME_DIE_CHECK);
     }
 
-    private class ConnectionActor extends ReflectedActor {
+    private ActorSelection connection() {
+        return new ActorSelection(Props.create(ConnectionActor.class, new ActorCreator<ConnectionActor>() {
+            @Override
+            public ConnectionActor create() {
+                return new ConnectionActor(TransportTcpPool.this);
+            }
+        }).changeDispatcher("connection"),
+                "tcp_connection_" + proto.getInstanceIndex());
+    }
 
-        private ConnectorMessenger messenger;
+    private ActorSelection scheduller() {
+        return new ActorSelection(Props.create(SchedullerActor.class, new ActorCreator<SchedullerActor>() {
+            @Override
+            public SchedullerActor create() {
+                return new SchedullerActor(TransportTcpPool.this);
+            }
+        }), "tcp_scheduller_" + proto.getInstanceIndex());
+    }
 
-        private ConnectionActor(ActorSystem system) {
-            super(system, "connector", "connector");
-            this.messenger = new ConnectorMessenger(self());
-        }
+    private static final class CheckDestroy {
 
-        public ConnectorMessenger messenger() {
-            return messenger;
+    }
+
+    private static final class CheckConnections {
+
+    }
+
+    private static final class Schedule {
+
+    }
+
+    private static class ConnectionActor extends Actor {
+        private TransportTcpPool pool;
+
+        private ConnectionActor(TransportTcpPool pool) {
+            this.pool = pool;
         }
 
         @Override
-        protected void registerMethods() {
-            registerMethod("check")
-                    .enabledBackOff()
-                    .enableSingleShot();
-            registerMethod("checkDestroy")
-                    .enableSingleShot();
+        public void preStart() {
+            self().send(new CheckConnections());
         }
 
-        protected void onCheckDestroyMessage() throws Exception {
-            if (mode == MODE_LOWMODE) {
-                if (scheduller.hasRequests()) {
-                    messenger().checkDestroy();
+        @Override
+        public void onReceive(Object message) {
+            if (message instanceof CheckDestroy) {
+                onCheckDestroyMessage();
+            } else if (message instanceof CheckConnections) {
+                onCheckMessage();
+            }
+        }
+
+        protected void onCheckDestroyMessage() {
+            if (pool.mode == MODE_LOWMODE) {
+                if (pool.scheduller.hasRequests()) {
+                    self().send(new CheckDestroy(), LOW_TIME_DIE_CHECK);
                     return;
                 }
 
-                Logger.d(TAG, "Destroying contexts");
-                synchronized (contexts) {
-                    for (TcpContext c : contexts) {
+                // Logger.d(TAG, "Destroying contexts");
+                synchronized (pool.contexts) {
+                    for (TcpContext c : pool.contexts) {
                         c.close();
                     }
-                    contexts.clear();
+                    pool.contexts.clear();
                 }
             }
         }
 
-        protected void onCheckMessage() throws Exception {
-            if (mode == MODE_LOWMODE) {
-                if (!scheduller.hasRequests()) {
-                    Logger.d(TAG, "Ignoring context check: scheduller is empty in low mode.");
-                    return;
-                }
-            }
-
-            synchronized (contexts) {
-                if (contexts.size() >= desiredConnectionCount) {
-                    Logger.d(TAG, "Ignoring context check: already created enough contexts.");
-                    return;
-                }
-            }
-
-            ConnectionType type = connectionRate.tryConnection();
-            Logger.d(TAG, "Creating context for #" + type.getId() + " " + type.getHost() + ":" + type.getPort());
+        protected void onCheckMessage() {
             try {
-                TcpContext context = new TcpContext(proto, type.getHost(), type.getPort(), USE_CHECKSUM, tcpListener);
-                Logger.d(TAG, "Context created.");
-                synchronized (contexts) {
-                    contexts.add(context);
-                    contextConnectionId.put(context.getContextId(), type.getId());
+                if (pool.mode == MODE_LOWMODE) {
+                    if (!pool.scheduller.hasRequests()) {
+                        // Logger.d(TAG, "Ignoring context check: scheduller is empty in low mode.");
+                        return;
+                    }
                 }
-                scheduller.postMessageDelayed(new MTPing(Entropy.generateRandomId()), false, PING_TIMEOUT, 0, context.getContextId(), false);
-            } catch (IOException e) {
-                Logger.d(TAG, "Context create failure.");
-                connectionRate.onConnectionFailure(type.getId());
-                throw e;
-            }
 
-            messenger().check();
-        }
+                synchronized (pool.contexts) {
+                    if (pool.contexts.size() >= pool.desiredConnectionCount) {
+                        // Logger.d(TAG, "Ignoring context check: already created enough contexts.");
+                        return;
+                    }
+                }
 
-        private class ConnectorMessenger extends ActorMessenger {
+                ConnectionType type = pool.connectionRate.tryConnection();
+                // Logger.d(TAG, "Creating context for #" + type.getId() + " " + type.getHost() + ":" + type.getPort());
+                try {
+                    TcpContext context = new TcpContext(pool.proto, type.getHost(), type.getPort(), USE_CHECKSUM, pool.tcpListener);
+                    // Logger.d(TAG, "Context created.");
+                    synchronized (pool.contexts) {
+                        pool.contexts.add(context);
+                        pool.contextConnectionId.put(context.getContextId(), type.getId());
+                    }
+                    pool.scheduller.postMessageDelayed(new MTPing(Entropy.generateRandomId()), false, PING_TIMEOUT, 0, context.getContextId(), false);
+                } catch (IOException e) {
+                    // Logger.d(TAG, "Context create failure.");
+                    pool.connectionRate.onConnectionFailure(type.getId());
+                    throw e;
+                }
 
-            private ConnectorMessenger(ActorReference reference) {
-                super(reference, null);
-            }
-
-            private ConnectorMessenger(ActorReference reference, ActorReference sender) {
-                super(reference, sender);
-            }
-
-            public void check() {
-                talkRaw("check");
-            }
-
-            public void checkDestroy() {
-                talkRawDelayed("checkDestroy", LOW_TIME_DIE_CHECK);
-            }
-
-            @Override
-            public ActorMessenger cloneForSender(ActorReference sender) {
-                return new ConnectorMessenger(reference, sender);
+                // messenger().check();
+                self().send(new CheckConnections());
+            } catch (Exception e) {
+                self().send(new CheckConnections(), 1000);
             }
         }
     }
 
-    private class SchedullerActor extends ReflectedActor {
-
+    private static class SchedullerActor extends Actor {
+        private TransportTcpPool pool;
         private PrepareSchedule prepareSchedule = new PrepareSchedule();
+        private int roundRobin = 0;
 
-        public SchedullerActor(ActorSystem system) {
-            super(system, "scheduller", "scheduller");
-        }
-
-        public Messenger messenger() {
-            return new Messenger(self());
+        private SchedullerActor(TransportTcpPool pool) {
+            this.pool = pool;
         }
 
         @Override
-        protected void registerMethods() {
-            registerMethod("schedule");
+        public void preStart() {
+            self().send(new Schedule());
+        }
+
+        @Override
+        public void onReceive(Object message) {
+            if (message instanceof Schedule) {
+                onScheduleMessage();
+            }
         }
 
         public void onScheduleMessage() {
-            Logger.d(TAG, "onScheduleMessage");
+            // Logger.d(TAG, "onScheduleMessage");
             int[] contextIds;
-            synchronized (contexts) {
-                TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
+            synchronized (pool.contexts) {
+                TcpContext[] currentContexts = pool.contexts.toArray(new TcpContext[0]);
                 contextIds = new int[currentContexts.length];
                 for (int i = 0; i < contextIds.length; i++) {
                     contextIds[i] = currentContexts[i].getContextId();
                 }
             }
 
-            scheduller.prepareScheduller(prepareSchedule, contextIds);
+            pool.scheduller.prepareScheduller(prepareSchedule, contextIds);
             if (prepareSchedule.isDoWait()) {
-                if (LOG_SCHEDULLER) {
-                    Logger.d(TAG, "Scheduller:wait " + prepareSchedule.getDelay());
-                }
-                messenger().scheduleDelayed(prepareSchedule.getDelay());
+//                if (LOG_SCHEDULLER) {
+//                    Logger.d(TAG, "Scheduller:wait " + prepareSchedule.getDelay());
+//                }
+                self().sendOnce(new Schedule(), prepareSchedule.getDelay());
                 return;
             }
 
             TcpContext context = null;
-            synchronized (contexts) {
-                TcpContext[] currentContexts = contexts.toArray(new TcpContext[0]);
+            synchronized (pool.contexts) {
+                TcpContext[] currentContexts = pool.contexts.toArray(new TcpContext[0]);
                 outer:
                 for (int i = 0; i < currentContexts.length; i++) {
                     int index = (i + roundRobin + 1) % currentContexts.length;
@@ -255,75 +265,57 @@ public class TransportTcpPool extends TransportPool {
             }
 
             if (context == null) {
-                if (LOG_SCHEDULLER) {
-                    Logger.d(TAG, "Scheduller: no context");
-                }
-                messenger().schedule();
+//                if (LOG_SCHEDULLER) {
+//                    Logger.d(TAG, "Scheduller: no context");
+//                }
+//                messenger().schedule();
+                self().sendOnce(new Schedule());
                 return;
             }
 
-            if (LOG_SCHEDULLER) {
-                Logger.d(TAG, "doSchedule");
-            }
+//            if (LOG_SCHEDULLER) {
+//                Logger.d(TAG, "doSchedule");
+//            }
 
             long start = System.currentTimeMillis();
-            PreparedPackage preparedPackage = scheduller.doSchedule(context.getContextId(), initedContext.contains(context.getContextId()));
-            if (LOG_SCHEDULLER) {
-                Logger.d(TAG, "Schedulled in " + (System.currentTimeMillis() - start) + " ms");
-            }
+            PreparedPackage preparedPackage = pool.scheduller.doSchedule(context.getContextId(), pool.initedContext.contains(context.getContextId()));
+//            if (LOG_SCHEDULLER) {
+//                Logger.d(TAG, "Schedulled in " + (System.currentTimeMillis() - start) + " ms");
+//            }
             if (preparedPackage == null) {
-                if (LOG_SCHEDULLER) {
-                    Logger.d(TAG, "No packages for scheduling");
-                }
-                messenger().schedule();
+//                if (LOG_SCHEDULLER) {
+//                    Logger.d(TAG, "No packages for scheduling");
+//                }
+//                messenger().schedule();
+                self().sendOnce(new Schedule());
                 return;
             }
 
-            if (LOG_SCHEDULLER) {
-                Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): time:" + getUnixTime(preparedPackage.getMessageId()));
-                Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): seqNo:" + preparedPackage.getSeqNo() + ", msgId" + preparedPackage.getMessageId());
-            }
+//            if (LOG_SCHEDULLER) {
+//                Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): time:" + getUnixTime(preparedPackage.getMessageId()));
+//                Logger.d(TAG, "MessagePushed (#" + context.getContextId() + "): seqNo:" + preparedPackage.getSeqNo() + ", msgId" + preparedPackage.getMessageId());
+//            }
 
             try {
-                EncryptedMessage msg = encrypt(preparedPackage.getSeqNo(), preparedPackage.getMessageId(), preparedPackage.getContent());
+                EncryptedMessage msg = pool.encrypt(preparedPackage.getSeqNo(), preparedPackage.getMessageId(), preparedPackage.getContent());
                 if (preparedPackage.isHighPriority()) {
-                    scheduller.registerFastConfirm(preparedPackage.getMessageId(), msg.fastConfirm);
+                    pool.scheduller.registerFastConfirm(preparedPackage.getMessageId(), msg.fastConfirm);
                 }
                 if (!context.isClosed()) {
                     context.postMessage(msg.data, preparedPackage.isHighPriority());
-                    initedContext.add(context.getContextId());
+                    pool.initedContext.add(context.getContextId());
                 } else {
-                    scheduller.onConnectionDies(context.getContextId());
+                    pool.scheduller.onConnectionDies(context.getContextId());
                 }
             } catch (IOException e) {
-                Logger.e(TAG, e);
+                // Logger.e(TAG, e);
             }
 
-            if (LOG_SCHEDULLER) {
-                Logger.d(TAG, "doSchedule end");
-            }
+//            if (LOG_SCHEDULLER) {
+//                Logger.d(TAG, "doSchedule end");
+//            }
 
-            messenger().schedule();
-        }
-
-        private class Messenger extends ActorMessenger {
-
-            protected Messenger(ActorReference reference) {
-                super(reference, null);
-            }
-
-            public void schedule() {
-                talkRaw("schedule");
-            }
-
-            public void scheduleDelayed(long delay) {
-                talkRawDelayed("schedule", delay);
-            }
-
-            @Override
-            public ActorMessenger cloneForSender(ActorReference sender) {
-                return null;
-            }
+            self().sendOnce(new Schedule());
         }
     }
 
@@ -356,7 +348,7 @@ public class TransportTcpPool extends TransportPool {
                         connectionRate.onConnectionFailure(contextConnectionId.get(context.getContextId()));
                     }
                     contexts.remove(context);
-                    connectionActor.check();
+                    connectionActor.send(new CheckConnections());
                     scheduller.onConnectionDies(context.getContextId());
                 }
             }
@@ -382,7 +374,7 @@ public class TransportTcpPool extends TransportPool {
                         connectionRate.onConnectionFailure(contextConnectionId.get(contextId));
                     }
                 }
-                connectionActor.check();
+                connectionActor.send(new CheckConnections());
             }
             scheduller.onConnectionDies(context.getContextId());
         }

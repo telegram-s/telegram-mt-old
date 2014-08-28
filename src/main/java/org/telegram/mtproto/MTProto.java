@@ -1,6 +1,6 @@
 package org.telegram.mtproto;
 
-import org.telegram.actors.*;
+import com.droidkit.actors.*;
 import org.telegram.mtproto.log.Logger;
 import org.telegram.mtproto.schedule.Scheduller;
 import org.telegram.mtproto.secure.Entropy;
@@ -84,9 +84,9 @@ public class MTProto {
     private int mode = MODE_GENERAL;
     private final Scheduller scheduller;
     private final ArrayList<Long> receivedMessages = new ArrayList<Long>();
-    private ResponseActor.ResponseMessenger responseActor;
+    private final ActorRef responseActor;
+    private final ActorRef actionsActor;
     private MTProtoCallback callback;
-    private InternalActionsActor.Messenger actionsActor;
 
     private boolean isClosed;
 
@@ -99,9 +99,10 @@ public class MTProto {
         this.TAG = "MTProto#" + INSTANCE_INDEX;
         this.mode = mode;
         this.actorSystem = new ActorSystem();
-        this.actorSystem.addThread("response");
-        this.actorSystem.addThread("connector");
-        this.actorSystem.addThread("scheduller");
+        this.actorSystem.addDispatcher("connector");
+        this.responseActor = actorSystem.actorOf(processor());
+        this.actionsActor = actorSystem.actorOf(internal());
+
         this.state = state;
         this.callback = callback;
         this.authKey = state.getAuthKey();
@@ -111,12 +112,11 @@ public class MTProto {
         this.session = Entropy.generateSeed(8);
         this.scheduller = new Scheduller(this, callWrapper);
         this.scheduller.postMessage(new MTPing(Entropy.generateRandomId()), false, Long.MAX_VALUE);
-        this.responseActor = new ResponseActor(actorSystem).messenger();
-        this.actionsActor = new InternalActionsActor(actorSystem).messenger();
+
         this.transportPool = new TransportTcpPool(this, new TransportPoolCallback() {
             @Override
             public void onMTMessage(MTMessage message) {
-                responseActor.onMessage(message);
+                responseActor.send(message);
             }
 
             @Override
@@ -139,8 +139,9 @@ public class MTProto {
                 break;
 
         }
-        this.actionsActor.ping();
-        this.actionsActor.requestSalts();
+
+        this.actionsActor.sendOnce(new RequestPingDelay());
+        this.actionsActor.sendOnce(new RequestSalt());
     }
 
     public AbsMTProtoState getState() {
@@ -149,12 +150,12 @@ public class MTProto {
 
     public void resetNetworkBackoff() {
         this.transportPool.resetConnectionBackoff();
-        this.actionsActor.ping();
+        this.actionsActor.sendOnce(new RequestPingDelay());
     }
 
     public void reloadConnectionInformation() {
         this.transportPool.reloadConnectionInformation();
-        this.actionsActor.ping();
+        this.actionsActor.sendOnce(new RequestPingDelay());
     }
 
     public int getInstanceIndex() {
@@ -211,14 +212,15 @@ public class MTProto {
 
             }
 
-            actionsActor.ping();
+            this.actionsActor.sendOnce(new RequestPingDelay());
         }
     }
 
     public void close() {
         if (!isClosed) {
             this.isClosed = true;
-            this.actorSystem.close();
+            // TODO: implement
+            // this.actorSystem.close();
             this.transportPool.close();
         }
     }
@@ -278,7 +280,7 @@ public class MTProto {
                     state.badServerSalt(salt);
                     Logger.d(TAG, "Reschedule messages because bad_server_salt #" + badMessage.getBadMsgId());
                     scheduller.resendAsNewMessage(badMessage.getBadMsgId());
-                    actionsActor.requestSalts();
+                    this.actionsActor.sendOnce(new RequestSalt());
                 } else if (badMessage.getErrorCode() == ERROR_BAD_CONTAINER ||
                         badMessage.getErrorCode() == ERROR_CONTAINER_MSG_ID_INCORRECT) {
                     scheduller.resendMessage(badMessage.getBadMsgId());
@@ -460,120 +462,100 @@ public class MTProto {
         return true;
     }
 
-    @Override
-    public String toString() {
-        return "mtproto#" + INSTANCE_INDEX;
+    private ActorSelection internal() {
+        return new ActorSelection(Props.create(InternalActionsActor.class, new ActorCreator<InternalActionsActor>() {
+            @Override
+            public InternalActionsActor create() {
+                return new InternalActionsActor(MTProto.this);
+            }
+        }), "internal_" + INSTANCE_INDEX);
     }
 
-    private class InternalActionsActor extends ReflectedActor {
+    private ActorSelection processor() {
+        return new ActorSelection(Props.create(ResponseActor.class, new ActorCreator<ResponseActor>() {
+            @Override
+            public ResponseActor create() {
+                return new ResponseActor(MTProto.this);
+            }
+        }), "response_" + INSTANCE_INDEX);
+    }
+
+    private static class RequestSalt {
+    }
+
+    private static class RequestPingDelay {
+
+    }
+
+    private static class InternalActionsActor extends Actor {
 
         private int lastPingMessage = -1;
+        private final MTProto proto;
 
-        public InternalActionsActor(ActorSystem system) {
-            super(system, "internal_actions", "scheduller");
-        }
-
-        public Messenger messenger() {
-            return new Messenger(self());
+        public InternalActionsActor(MTProto proto) {
+            this.proto = proto;
         }
 
         @Override
-        protected void registerMethods() {
-            registerMethod("requestSalts")
-                    .enableSingleShot();
-            registerMethod("pingDelay")
-                    .enableSingleShot();
+        public void onReceive(Object message) {
+            if (message instanceof RequestSalt) {
+                onRequestSaltsMessage();
+            } else if (message instanceof RequestPingDelay) {
+                onPingDelayMessage();
+            }
         }
 
         public void onRequestSaltsMessage() {
-            Logger.d(TAG, "Salt check timeout");
+            // Logger.d(TAG, "Salt check timeout");
             if (TimeOverlord.getInstance().getTimeAccuracy() > 1000) {
-                Logger.d(TAG, "Time is not accurate: " + TimeOverlord.getInstance().getTimeAccuracy());
-                messenger().requestSaltsDelayed(FUTURE_NO_TIME_TIMEOUT);
+                // Logger.d(TAG, "Time is not accurate: " + TimeOverlord.getInstance().getTimeAccuracy());
+                self().send(new RequestSalt(), FUTURE_NO_TIME_TIMEOUT);
                 return;
             }
-            int count = state.maximumCachedSalts((int) (TimeOverlord.getInstance().getServerTime() / 1000));
+            int count = proto.state.maximumCachedSalts((int) (TimeOverlord.getInstance().getServerTime() / 1000));
             if (count < FUTURE_MINIMAL) {
-                Logger.d(TAG, "Too few actual salts: " + count + ", requesting news");
-                scheduller.postMessage(new MTGetFutureSalts(FUTURE_REQUEST_COUNT), false, FUTURE_TIMEOUT);
+                // Logger.d(TAG, "Too few actual salts: " + count + ", requesting news");
+                proto.scheduller.postMessage(new MTGetFutureSalts(FUTURE_REQUEST_COUNT), false, FUTURE_TIMEOUT);
             }
-            messenger().requestSaltsDelayed(FUTURE_TIMEOUT);
+            self().send(new RequestSalt(), FUTURE_TIMEOUT);
         }
 
         public void onPingDelayMessage() {
             if (lastPingMessage >= 0) {
-                forgetMessage(lastPingMessage);
+                proto.forgetMessage(lastPingMessage);
                 lastPingMessage = -1;
             }
-            if (mode == MODE_GENERAL) {
-                Logger.d(TAG, "Ping delay disconnect for " + PING_INTERVAL + " sec");
-                lastPingMessage = scheduller.postMessage(new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL),
+            if (proto.mode == MODE_GENERAL) {
+                // Logger.d(TAG, "Ping delay disconnect for " + PING_INTERVAL + " sec");
+                lastPingMessage = proto.scheduller.postMessage(new MTPingDelayDisconnect(Entropy.generateRandomId(), PING_INTERVAL),
                         false, PING_INTERVAL_REQUEST);
-                messenger().pingDelayed(PING_INTERVAL_REQUEST);
-            } else if (mode == MODE_PUSH) {
-                lastPingMessage = scheduller.postMessage(new MTPing(Entropy.generateRandomId()), false, PING_INTERVAL_REQUEST);
-                messenger().pingDelayed(PING_PUSH_REQUEST);
-            }
-        }
-
-        private class Messenger extends ActorMessenger {
-
-            protected Messenger(ActorReference reference) {
-                super(reference, null);
-            }
-
-            public void ping() {
-                talkRaw("pingDelay");
-            }
-
-            public void pingDelayed(long delayed) {
-                talkRawDelayed("pingDelay", delayed);
-            }
-
-            public void requestSalts() {
-                talkRaw("requestSalts");
-            }
-
-            public void requestSaltsDelayed(long delay) {
-                talkRaw("requestSalts", delay);
-            }
-
-            @Override
-            public ActorMessenger cloneForSender(ActorReference sender) {
-                return null;
+                self().send(new RequestPingDelay(), PING_INTERVAL_REQUEST);
+            } else if (proto.mode == MODE_PUSH) {
+                lastPingMessage = proto.scheduller.postMessage(new MTPing(Entropy.generateRandomId()), false, PING_INTERVAL_REQUEST);
+                self().send(new RequestPingDelay(), PING_PUSH_REQUEST);
             }
         }
     }
 
-    private class ResponseActor extends ReflectedActor {
+    private static class ResponseActor extends Actor {
+        private final MTProto proto;
 
-        public ResponseActor(ActorSystem system) {
-            super(system, "response", "response");
+        private ResponseActor(MTProto proto) {
+            this.proto = proto;
         }
 
-        public void onNewMessage(MTMessage message) {
-            onMTMessage(message);
-            BytesCache.getInstance().put(message.getContent());
-        }
-
-        public ResponseMessenger messenger() {
-            return new ResponseMessenger(self());
-        }
-
-        private class ResponseMessenger extends ActorMessenger {
-
-            protected ResponseMessenger(ActorReference reference) {
-                super(reference, null);
-            }
-
-            public void onMessage(MTMessage message) {
-                talkRaw("new", message);
-            }
-
-            @Override
-            public ActorMessenger cloneForSender(ActorReference sender) {
-                return new ResponseMessenger(reference);
+        @Override
+        public void onReceive(Object message) {
+            if (message instanceof MTMessage) {
+                MTMessage mtMessage = (MTMessage) message;
+                proto.onMTMessage(mtMessage);
+                BytesCache.getInstance().put(mtMessage.getContent());
             }
         }
+    }
+
+    @Override
+    public String toString() {
+        return "mtproto#" + INSTANCE_INDEX;
     }
 }

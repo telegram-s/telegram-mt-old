@@ -1,7 +1,5 @@
 package org.telegram.mtproto.schedule;
 
-import com.sun.jndi.url.iiop.iiopURLContext;
-import org.omg.PortableServer.ServantRetentionPolicy;
 import org.telegram.mtproto.CallWrapper;
 import org.telegram.mtproto.MTProto;
 import org.telegram.mtproto.log.Logger;
